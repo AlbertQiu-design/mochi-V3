@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" data-state="running" data-char="grok">
+  <g id="body">
+    <path d="M32.0 12.5 C43.32 12.5 52.5 21.68 52.5 33.0 C52.5 44.32 43.32 53.5 32.0 53.5 C20.68 53.5 11.5 44.32 11.5 33.0 C11.5 21.68 20.68 12.5 32.0 12.5 Z" fill="#2A2A2A" stroke="#8A8A8A" stroke-width="2.1" stroke-linejoin="round" stroke-linecap="round"/>
+  </g>
+  <g id="eye-l"><rect x="24.60" y="27.60" width="2.80" height="6.80" rx="1.40" fill="#FFFFFF" transform="rotate(14.0 26.00 31.00)"/></g>
+  <g id="eye-r"><rect x="36.60" y="27.60" width="2.80" height="6.80" rx="1.40" fill="#FFFFFF" transform="rotate(14.0 38.00 31.00)"/></g>
+</svg>

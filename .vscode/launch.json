@@ -1,0 +1,85 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Tamagotchi Web",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/src/web_server.py",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "justMyCode": true,
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      }
+    },
+    {
+      "name": "Tamagotchi",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/src/main.py",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "justMyCode": true,
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      }
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:mochi-island-settings}",
+      "name": "Debug MochiIsland",
+      "program": "${workspaceFolder:mochi-island-settings}/.build/debug/MochiIsland",
+      "preLaunchTask": "swift: Build Debug MochiIsland"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:mochi-island-settings}",
+      "name": "Release MochiIsland",
+      "program": "${workspaceFolder:mochi-island-settings}/.build/release/MochiIsland",
+      "preLaunchTask": "swift: Build Release MochiIsland"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:mochi-island-settings}",
+      "name": "Debug MochiHookCLI",
+      "program": "${workspaceFolder:mochi-island-settings}/.build/debug/MochiHookCLI",
+      "preLaunchTask": "swift: Build Debug MochiHookCLI"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:mochi-island-settings}",
+      "name": "Release MochiHookCLI",
+      "program": "${workspaceFolder:mochi-island-settings}/.build/release/MochiHookCLI",
+      "preLaunchTask": "swift: Build Release MochiHookCLI"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:mochi-island-settings}",
+      "name": "Debug MochiCoreChecks",
+      "program": "${workspaceFolder:mochi-island-settings}/.build/debug/MochiCoreChecks",
+      "preLaunchTask": "swift: Build Debug MochiCoreChecks"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:mochi-island-settings}",
+      "name": "Release MochiCoreChecks",
+      "program": "${workspaceFolder:mochi-island-settings}/.build/release/MochiCoreChecks",
+      "preLaunchTask": "swift: Build Release MochiCoreChecks"
+    }
+  ]
+}

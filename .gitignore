@@ -1,0 +1,15 @@
+.DS_Store
+.build/
+.venv/
+.swiftpm/
+**/__pycache__/
+*.pyc
+.env
+.env.*
+!.env.example
+*.dmg
+DerivedData/
+island_offset.json
+.mochi-latency-addendum.txt
+.mochi-latency-result.txt
+.mochi-shots/

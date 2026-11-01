@@ -1,0 +1,20 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Core checks
+        run: swift run -c debug MochiCoreChecks
+      - name: Build app and hook
+        run: |
+          swift build --product MochiIsland
+          swift build --product MochiHookCLI
+      - name: Release package has no local server
+        run: |
+          ! grep -R -n -E '127\.0\.0\.1|8765|fetch\(|python3|osascript|NSAllowsArbitraryLoads|killall' Sources web/island.js web/island.html web/island.css

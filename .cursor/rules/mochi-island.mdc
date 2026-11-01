@@ -1,0 +1,23 @@
+---
+description: Mochi Island shipping rules. Keep the app off localhost Python and off guilt-based pet death.
+globs: Sources/**,web/**,island/**,Scripts/**,AGENTS.md
+alwaysApply: true
+---
+
+# Mochi Island
+
+Read `AGENTS.md` before changing the app. The shipping app is Swift plus `web/island.*`. No Python, Node, or localhost port.
+
+The page talks to Swift only through `webkit.messageHandlers.island` (`action` + `rpc`, reply `window.mochiReply`). Do not add `fetch` to a local URL. New actions go in the AGENTS.md message table.
+
+Pet rules live in `Sources/MochiCore/PetEngine.swift`. The page only draws them. Food is one finished Cursor task, once per task id. Play is manual. There is no Feed button, no death, and no guilt copy. Hunger at 95 or energy at 0 only puts the pet to sleep; the next finished task wakes it.
+
+Writable files: `~/Library/Application Support/com.mochiisland.mac/` or `~/.cursor/mochi-island-*`. Write JSON via a temp file, then replace. Back up `hooks.json` before editing it, and only touch entries marked `mochi-island`. The hook binary is `MochiHookCLI` inside the app. If the hook fails, it still exits 0.
+
+Do not scan agent transcripts unless the user enables that switch, and do not persist prompt or command text. Do not click Cursor with AppleScript or Accessibility. Do not start agents with the Cursor SDK. Non-permission choices open Cursor.
+
+UI: 68×602 floating `NSPanel` with a 60-wide `.glassEffect(.clear, in: .capsule)` dock. Four seed agents + white `plus` + white `gearshape`. Height hugs the list and grows, cap 570/602. 40pt buttons, 36px Designer faces (Cursor, Grok, full kitten-v1 PNGs, Codex symbol). Selection is `Circle` + white.opacity + spring `matchedGeometryEffect`. Hover and approval use `.glassEffect(.clear)` including the caret. Settings is an independent higher-level panel so the click-through host WebView cannot steal tab clicks. The three macOS window buttons sit at the top left and close dismisses settings. The light tab bar is on the next row. The selection is Liquid Glass only while it springs, then a slightly deeper flat fill. Pages are General, Pet, Sound, and Agents. The Pet page is the live pet, its size, and a letter picker (`look` = a…f). There is no color page and no hex field. Never use `<input type="color">`.
+
+Bundle ID `com.mochiisland.mac` and the minimum system version stay on macOS 26 in both `island/Info.plist` and `Package.swift`. Do not disable ATS. Do not ship an ad-hoc signature. Changes to `MochiCore` or `AppSession` update `Tests/MochiCoreChecks/main.swift`.
+
+Before a build, search `Sources` and `web/island.*` for `127.0.0.1`, `8765`, `fetch(`, `python3`, `osascript`, `NSAllowsArbitraryLoads`, and `killall`. Run `swift run -c debug MochiCoreChecks`.

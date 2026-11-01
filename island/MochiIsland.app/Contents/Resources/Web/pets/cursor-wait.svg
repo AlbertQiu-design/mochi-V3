@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" data-state="wait" data-char="cursor">
+  <g id="body">
+    <path fill="#F07171" d="M 13.50 23.50 L 32.00 34.50 L 32.00 53.50 L 13.50 42.50 Z"/>
+    <path fill="#C43C3C" d="M 50.50 29.96 L 50.50 42.50 L 32.00 53.50 L 32.00 34.50 L 38.66 28.64 L 43.47 25.78 Z"/>
+    <path fill="#E85A5A" d="M 43.47 19.32 L 43.47 25.78 L 38.66 28.64 L 38.66 22.18 Z"/>
+    <path fill="#FFE4E4" d="M 32.00 12.50 L 43.47 19.32 L 38.66 22.18 L 32.00 34.50 L 13.50 23.50 Z"/>
+  </g>
+  <g id="eye-l"><ellipse cx="25.50" cy="37.20" rx="2.70" ry="7.00" fill="#111111"/></g>
+  <g id="eye-r"><ellipse cx="38.50" cy="37.20" rx="2.70" ry="7.00" fill="#111111"/></g>
+</svg>

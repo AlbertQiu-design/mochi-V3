@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" data-state="done" data-char="grok">
+  <g id="body">
+    <path d="M32.0 11.0 C34.0 11.0 48.0 24.5 51.5 29.5 C53.2 32.0 53.2 34.5 51.5 37.0 C48.0 42.0 34.0 55.0 32.0 55.0 C30.0 55.0 16.0 42.0 12.5 37.0 C10.8 34.5 10.8 32.0 12.5 29.5 C16.0 24.5 30.0 11.0 32.0 11.0 Z" fill="#4CBF68" stroke="#111111" stroke-width="2.1" stroke-linejoin="round" stroke-linecap="round"/>
+  </g>
+  <g id="eye-l"><path d="M22.00 30.80 Q26.00 26.40 30.00 30.80" fill="none" stroke="#FFFFFF" stroke-width="2.8" stroke-linecap="round"/></g>
+  <g id="eye-r"><path d="M34.00 30.80 Q38.00 26.40 42.00 30.80" fill="none" stroke="#FFFFFF" stroke-width="2.8" stroke-linecap="round"/></g>
+</svg>
