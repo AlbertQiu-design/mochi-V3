@@ -321,6 +321,72 @@ func TaskReaderKeepsSource() throws {
         check(tasks.first { $0.id == "x" }?.dictionary["source"] as? String == "codex")
     }
 
+func AbandonedApprovalDoesNotStay() throws {
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent("mochi-stale-approval-\(UUID().uuidString).json")
+    let now = Date().timeIntervalSince1970
+    let old = "2026-10-22T05:59:43Z"
+    let payload: [String: Any] = [
+        "tasks": [
+            "pm": [
+                "id": "pm",
+                "status": "pending",
+                "kind": "question",
+                "source": "cursor",
+                "title": "Cursor",
+                "updated": old,
+                "summary": "请点 Allow 或 Deny 验证审批热区",
+                "options": [
+                    ["id": "allow", "label": "Allow"],
+                    ["id": "deny", "label": "Deny"]
+                ]
+            ],
+            "live": [
+                "id": "live",
+                "status": "wait",
+                "kind": "permission",
+                "source": "cursor",
+                "title": "Shell",
+                "updated": now,
+                "options": [
+                    ["id": "allow", "label": "Allow"],
+                    ["id": "deny", "label": "Deny"]
+                ]
+            ]
+        ]
+    ]
+    try JSONSerialization.data(withJSONObject: payload).write(to: url)
+    let tasks = TaskReader.load(tasksURL: url, now: now)
+    check(tasks.contains { $0.id == "pm" } == false)
+    check(tasks.contains { $0.id == "live" })
+    let parsed = TaskReader.timestamp(old)
+    check(parsed > 1_700_000_000)
+    check(now - parsed > AppConfig.iconMaxAge)
+    check(AgentIconList.shouldShow(
+        AgentIconCandidate(
+            id: "stale-run",
+            source: "cursor",
+            title: "Cursor",
+            status: "running",
+            read: false,
+            updated: parsed,
+            hasPendingOptions: true
+        ),
+        now: now
+    ) == false)
+    check(AgentIconList.shouldShow(
+        AgentIconCandidate(
+            id: "live",
+            source: "cursor",
+            title: "Shell",
+            status: "wait",
+            read: false,
+            updated: now,
+            hasPendingOptions: true
+        ),
+        now: now
+    ))
+}
+
 func AgentLaunchFindsInstalledAppsAndCodexFallback() {
         let cursor = AgentLaunch.plan(source: "Cursor") { path in
             path.hasSuffix("/Cursor.app")
@@ -796,7 +862,8 @@ func AgentIconsStayOnePerConversation() {
     check(keptChoice.map(\.id) == ["choice"])
     // Quiet conversations are not in progress. Seen or not, they leave.
     // Unread finished work and unanswered waits stay. Fresh running stays even after it was opened.
-    let clock = 10_000.0
+    // Later than iconMaxAge so a day-old timestamp stays positive. Zero or negative means "no time".
+    let clock = 10_000.0 + AppConfig.iconMaxAge
     let quiet = clock - AppConfig.activeTaskWindow - 1
     check(AgentIconList.isWorking(
         AgentIconCandidate(id: "fresh", source: "cursor", title: "R", status: "running", read: true, updated: clock),
@@ -2280,6 +2347,7 @@ BundleRefreshReplacesAnOlderProcess()
 TranscriptHintsStayOffTheHotPath()
 try ReplyWriterOnlyAllowsPermissionActions()
 try TaskReaderKeepsSource()
+try AbandonedApprovalDoesNotStay()
 AgentLaunchFindsInstalledAppsAndCodexFallback()
 try KittenPositionParsesAndClamps()
 try SpecConstantsAndShellGeometry()
