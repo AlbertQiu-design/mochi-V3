@@ -19,6 +19,8 @@ public struct HookOutcome: Equatable {
     public var detail: String
     /// Abbreviated submit text for the bubble. Empty on permission-only deliveries.
     public var summary: String
+    /// True only for a prompt event that carried submit text. Allow does not set this.
+    public var promptSubmitted: Bool
 
     public init(
         id: String,
@@ -32,7 +34,8 @@ public struct HookOutcome: Equatable {
         waitsForPermission: Bool = false,
         permissionStyle: String = "",
         detail: String = "",
-        summary: String = ""
+        summary: String = "",
+        promptSubmitted: Bool = false
     ) {
         self.id = id
         self.source = source
@@ -46,6 +49,7 @@ public struct HookOutcome: Equatable {
         self.permissionStyle = permissionStyle
         self.detail = detail
         self.summary = summary
+        self.promptSubmitted = promptSubmitted
     }
 }
 
@@ -110,11 +114,22 @@ public enum PermissionCopy {
         return trimmed
     }
 
-    /// Bubble line under Waiting. Prefers the stored chat summary; otherwise a short action hint.
-    public static func cardBlurb(summary: String, detail: String, kind: String, status: String, optionIDs: [String]) -> String {
+    /// Question line under the status. Running, waiting, done, and failed cards all use it.
+    /// Prefers the stored submit blurb, then a title that is the question itself.
+    public static func cardBlurb(
+        summary: String,
+        detail: String,
+        kind: String,
+        status: String,
+        optionIDs: [String],
+        title: String = ""
+    ) -> String {
+        _ = status
         let stored = abbreviate(summary)
         if !stored.isEmpty && !containsDebug(stored) { return stored }
-        if isPermission(kind: kind, status: status, optionIDs: optionIDs) {
+        let named = abbreviate(title)
+        if isQuestionTitle(named) { return named }
+        if isPermission(kind: kind, status: "wait", optionIDs: optionIDs) {
             switch actionKind(detail: detail) {
             case "Shell": return "Shell needs Allow"
             case "MCP": return "MCP needs Allow"
@@ -122,6 +137,19 @@ public enum PermissionCopy {
             }
         }
         return visibleDetail(kind: kind, status: status, detail: detail, optionIDs: optionIDs)
+    }
+
+    /// Agent names and permission labels are not the user's question.
+    private static func isQuestionTitle(_ title: String) -> Bool {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !containsDebug(trimmed) else { return false }
+        if actionKinds.contains(trimmed) { return false }
+        switch trimmed {
+        case "Cursor", "Codex", "Claude", "Gemini", "Copilot", "OpenCode", "Grok Bot", "GPT", "小猫", "New chat", "Permission", "Chat":
+            return false
+        default:
+            return true
+        }
     }
 
     /// First line of the submit text, clipped for the bubble. Stays on this Mac only.
@@ -157,7 +185,7 @@ public enum HookEvents {
         // Permission deliveries keep summary empty here; merge restores the prior chat blurb.
         let summary = waits ? "" : chatSummary(for: event, payload: payload)
         return HookOutcome(
-            id: sessionID(in: payload, source: source),
+            id: sessionID(in: payload, source: source, event: event),
             source: source,
             title: waits ? PermissionCopy.actionKind(detail: detail) : SlotFace.displayName(for: source),
             status: mapped,
@@ -168,8 +196,33 @@ public enum HookEvents {
             waitsForPermission: waits,
             permissionStyle: waits ? (source == "codex" ? "codex" : "cursor") : "",
             detail: detail,
-            summary: summary
+            summary: summary,
+            promptSubmitted: Self.isPromptSubmit(event) && !summary.isEmpty
         )
+    }
+
+    /// Chat submit events. An empty resume of `beforeSubmitPrompt` is not one of these.
+    /// Cursor, Codex, and Claude spell the same event differently.
+    private static func isPromptSubmit(_ event: String) -> Bool {
+        switch normalizedEvent(event) {
+        case "beforesubmitprompt", "userpromptsubmit", "userpromptsubmitted":
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func isSubagentEvent(_ event: String) -> Bool {
+        switch normalizedEvent(event) {
+        case "subagentstart", "subagentstop":
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func normalizedEvent(_ event: String) -> String {
+        event.lowercased().replacingOccurrences(of: "_", with: "").replacingOccurrences(of: "-", with: "")
     }
 
     /// Merges one delivery into the task dictionary. The stored record is id, agent, status, and time,
@@ -182,6 +235,10 @@ public enum HookEvents {
         var kind = outcome.kind
         var options = outcome.options
         var questionID = outcome.questionID
+        var submitGen = whole(previous["submit_gen"])
+        if outcome.promptSubmitted {
+            submitGen += 1
+        }
         if status == "closed" {
             tasks.removeValue(forKey: outcome.id)
             if oldKey != outcome.id { tasks.removeValue(forKey: oldKey) }
@@ -216,6 +273,9 @@ public enum HookEvents {
         }
         if !summary.isEmpty {
             record["summary"] = summary
+        }
+        if submitGen > 0 {
+            record["submit_gen"] = submitGen
         }
         if status == "wait" {
             record["kind"] = kind
@@ -489,15 +549,21 @@ public enum HookEvents {
 
     /// Short submit blurb for chat events only. Shell and MCP keep no command text here.
     /// Cursor may re-fire beforeSubmitPrompt with an empty prompt on resume; that yields "".
+    /// A subagent card uses its `task` text. The stop hook's output `summary` is agent text and is ignored.
     private static func chatSummary(for event: String, payload: [String: Any]) -> String {
-        switch event {
-        case "beforeSubmitPrompt", "UserPromptSubmit", "userPromptSubmitted":
+        if isPromptSubmit(event) {
             let prompt = promptText(in: payload)
             if prompt.isEmpty { return "" }
             return PermissionCopy.abbreviate(prompt)
-        default:
-            return ""
         }
+        if isSubagentEvent(event) {
+            // Only when this delivery has its own id, so a parent chat keeps its submit blurb.
+            guard !string(payload["subagent_id"]).isEmpty else { return "" }
+            let task = stringValue(payload["task"]) ?? ""
+            if task.isEmpty { return "" }
+            return PermissionCopy.abbreviate(task)
+        }
+        return ""
     }
 
     /// Reads the user submit text from common Cursor / Codex / Claude shapes without keeping the full payload.
@@ -507,8 +573,8 @@ public enum HookEvents {
                 return text
             }
         }
-        let input = dictionary(payload, keys: ["tool_input", "input", "arguments", "args"])
-        for key in ["prompt", "text", "content", "message"] {
+        let input = dictionary(payload, keys: ["tool_input", "input", "arguments", "args", "request", "payload", "data"])
+        for key in ["prompt", "text", "content", "message", "user_prompt", "userPrompt"] {
             if let text = stringValue(input[key]), !text.isEmpty {
                 return text
             }
@@ -536,14 +602,21 @@ public enum HookEvents {
             let joined = chunks.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
             return joined.isEmpty ? nil : joined
         }
+        if let dict = value as? [String: Any] {
+            for key in ["text", "content", "message", "prompt", "value"] {
+                if let text = dict[key] as? String {
+                    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !trimmed.isEmpty && trimmed != "nil" { return trimmed }
+                }
+            }
+        }
         return nil
     }
 
     /// A category for the bubble. The payload's prompt and command are never copied into detail.
     private static func safeDetail(for event: String, source: String) -> String {
+        if isPromptSubmit(event) { return "Chat" }
         switch event {
-        case "beforeSubmitPrompt", "UserPromptSubmit", "userPromptSubmitted":
-            return "Chat"
         case "beforeShellExecution":
             return "Shell"
         case "beforeMCPExecution":
@@ -638,7 +711,12 @@ public enum HookEvents {
 
     /// Uses id fields already in the JSON. A transcript path contributes only its file stem.
     /// The file itself is never opened.
-    private static func sessionID(in payload: [String: Any], source: String) -> String {
+    private static func sessionID(in payload: [String: Any], source: String, event: String) -> String {
+        // A subagent delivery is its own card. The parent conversation id would hide its task blurb.
+        if isSubagentEvent(event) {
+            let subagent = string(payload["subagent_id"])
+            if !subagent.isEmpty { return bareID(subagent) }
+        }
         for key in ["conversation_id", "session_id", "sessionId", "sessionID", "subagent_id", "composer_id", "thread_id"] {
             let value = string(payload[key])
             if !value.isEmpty { return bareID(value) }
@@ -763,6 +841,13 @@ public enum HookEvents {
             if let value = payload[key] as? [String: Any] { return value }
         }
         return [:]
+    }
+
+    private static func whole(_ value: Any?) -> Int {
+        if let number = value as? Int { return number }
+        if let number = value as? NSNumber { return number.intValue }
+        if let number = value as? Double { return Int(number) }
+        return 0
     }
 
     private static func string(_ value: Any?) -> String {

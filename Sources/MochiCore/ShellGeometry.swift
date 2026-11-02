@@ -276,15 +276,21 @@ public enum AgentIconList {
     public static let order = ["cursor", "codex", "claude", "gemini", "copilot", "opencode", "grok-bot", "gpt"]
 
     /// One row per conversation.
-    /// - `running` / `wait`: always stay in the capsule (silent icon; click opens the card).
+    /// - `running`: stays only while it is still being worked on (`activeTaskWindow`).
+    /// - `wait`: stays until the choice is made.
     /// - `done` / `fail`: stay while unread, while the bubble is holding them, or while choices remain.
-    /// - Read finished chats with no pending options leave after the bubble closes.
-    public static func rows(_ items: [AgentIconCandidate], holding: Set<String> = []) -> [AgentIconRow] {
+    /// - Anything last touched more than `iconMaxAge` ago leaves.
+    /// - Quiet work and read finished chats leave. Pass `now` from the app clock.
+    public static func rows(
+        _ items: [AgentIconCandidate],
+        holding: Set<String> = [],
+        now: Double? = nil
+    ) -> [AgentIconRow] {
         var visible: [AgentIconCandidate] = []
         for item in items {
             let source = AgentLaunch.normalize(item.source)
             if source == "mochi" { continue }
-            guard shouldShow(item, holding: holding) else { continue }
+            guard shouldShow(item, holding: holding, now: now) else { continue }
             var copy = item
             copy.source = source
             visible.append(copy)
@@ -312,14 +318,34 @@ public enum AgentIconList {
         }
     }
 
-    /// Live work never leaves the capsule. Finished work leaves only after a read with no choices.
-    public static func shouldShow(_ item: AgentIconCandidate, holding: Set<String> = []) -> Bool {
+    /// Still receiving hook updates. A missing clock treats every `running` row as live so older checks keep their fixtures.
+    public static func isWorking(_ item: AgentIconCandidate, now: Double?) -> Bool {
+        guard item.status == "running" else { return false }
+        guard let now else { return true }
+        return item.updated > 0 && now - item.updated <= AppConfig.activeTaskWindow
+    }
+
+    /// Last hook touch older than a day. A missing clock skips this so fixture rows stay put.
+    public static func isExpired(_ item: AgentIconCandidate, now: Double?) -> Bool {
+        guard let now, item.updated > 0 else { return false }
+        return now - item.updated > AppConfig.iconMaxAge
+    }
+
+    /// Live work stays. Quiet work leaves, including after it was opened. Finished work leaves once it has been read and has no choices. A conversation last touched more than a day ago leaves even if it is unread or still waiting.
+    public static func shouldShow(
+        _ item: AgentIconCandidate,
+        holding: Set<String> = [],
+        now: Double? = nil
+    ) -> Bool {
+        if isExpired(item, now: now) { return false }
+        if holding.contains(item.id) { return true }
+        if item.hasPendingOptions { return true }
         switch item.status {
-        case "running", "wait":
+        case "running":
+            return isWorking(item, now: now)
+        case "wait":
             return true
         case "done", "fail":
-            if holding.contains(item.id) { return true }
-            if item.hasPendingOptions { return true }
             return !item.read
         default:
             return false

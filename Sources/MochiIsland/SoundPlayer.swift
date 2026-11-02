@@ -34,9 +34,15 @@ final class SoundPlayer {
         playPreview(timbre)
     }
 
+    /// One task cue per second. A muted Mac stays quiet.
+    func playCue(_ name: String) {
+        guard gate.shouldPlay(now: Date().timeIntervalSince1970) else { return }
+        playPreview(name)
+    }
+
     func playPreview(_ timbre: String) {
         guard !Self.outputMuted() else { return }
-        let name = IslandPrefs.soundIDs.contains(timbre) ? timbre : "boop"
+        let name = Self.resolved(timbre)
         guard format != nil, let buffer = buffer(ToneSynth.render(name)) else { return }
         do {
             if !started {
@@ -62,6 +68,14 @@ final class SoundPlayer {
             channel[index] = sample
         }
         return buffer
+    }
+
+    private static func resolved(_ name: String) -> String {
+        if IslandPrefs.soundIDs.contains(name) { return name }
+        if IslandPrefs.submitSounds.contains(name) { return name }
+        if IslandPrefs.doneSounds.contains(name) { return name }
+        if IslandPrefs.stuckSounds.contains(name) { return name }
+        return "boop"
     }
 
     static func outputMuted() -> Bool {

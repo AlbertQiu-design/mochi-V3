@@ -209,6 +209,7 @@ struct BubbleFace: View {
                         .font(.system(size: 11, weight: .regular))
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 if !model.summary.isEmpty {
                     Text(model.summary)
@@ -216,6 +217,8 @@ struct BubbleFace: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 Spacer(minLength: 0)
             }
@@ -246,7 +249,9 @@ struct BubbleFace: View {
                 }
             }
         }
-        .padding(.horizontal, AppConfig.bubblePadX)
+        // Extra inset on the beak side, toward the kitten, so the blurb stays in the solid glass.
+        .padding(.leading, AppConfig.bubblePadX + (model.pointsRight ? 0 : 16))
+        .padding(.trailing, AppConfig.bubblePadX + (model.pointsRight ? 16 : 0))
         .padding(.vertical, AppConfig.bubblePadY)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
@@ -428,14 +433,15 @@ final class BubblePanel: NSObject {
             }
         }
         let status: CGFloat = model.status.isEmpty ? 0 : 14
-        let preview: CGFloat = model.summary.isEmpty ? 0 : 16
+        let preview: CGFloat = model.summary.isEmpty ? 0 : 18
         switch model.kind {
         case .picker:
             model.computedHeight = max(AppConfig.bubbleMinHeight, 28 + AppConfig.bubblePadY * 2)
         case .label:
             model.computedHeight = max(AppConfig.bubbleMinHeight, title + AppConfig.bubblePadY * 2)
         case .card, .alert:
-            let body = AppConfig.bubblePadY * 2 + 18 + preview + status + choices + 8
+            let gaps: CGFloat = (status > 0 ? 6 : 0) + (preview > 0 ? 6 : 0)
+            let body = AppConfig.bubblePadY * 2 + 18 + preview + status + gaps + choices + 8
             model.computedHeight = max(AppConfig.bubbleMinHeight, body)
         }
     }

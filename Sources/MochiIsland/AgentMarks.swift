@@ -254,6 +254,144 @@ struct AgentMark: View {
     }
 }
 
+/// Status ring around one agent icon. Drawn in the icon row, inside the 44pt row.
+/// `running` is a ring of blue dots that turns only while this view is on screen.
+/// `wait` and `fail` share a red ring with a bottom-right gap and an X in that gap.
+/// `done` is the same ring in green with a check. The stroke does not pass through the mark.
+struct AgentStatusRing: View {
+    var status: String
+
+    var body: some View {
+        switch status {
+        case "running":
+            TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
+                AgentThinkingDots(date: context.date)
+            }
+        case "wait", "fail":
+            AgentCornerRing(mark: .cross, color: Self.stuck)
+        case "done":
+            AgentCornerRing(mark: .check, color: Self.done)
+        default:
+            EmptyView()
+        }
+    }
+
+    static func voice(for status: String) -> String {
+        switch status {
+        case "running": return "Thinking"
+        case "wait", "fail": return "Stuck"
+        case "done": return "Done"
+        default: return ""
+        }
+    }
+
+    static let thinking = Color(red: 0.20, green: 0.50, blue: 1)
+    static let stuck = Color(red: 1, green: 59 / 255, blue: 48 / 255)
+    static let done = Color(red: 0.18, green: 0.73, blue: 0.36)
+}
+
+private struct AgentThinkingDots: View {
+    var date: Date
+
+    var body: some View {
+        Canvas { context, size in
+            let layout = AgentRingLayout(size: size)
+            let spin = date.timeIntervalSinceReferenceDate
+                .truncatingRemainder(dividingBy: layout.period) / layout.period
+            let turn = CGFloat(spin) * 2 * .pi
+            for index in 0..<layout.dotCount {
+                let angle = turn + (CGFloat(index) / CGFloat(layout.dotCount)) * 2 * .pi
+                let point = layout.point(angle: angle, radius: layout.radius)
+                let dot = layout.dot
+                let rect = CGRect(x: point.x - dot / 2, y: point.y - dot / 2, width: dot, height: dot)
+                context.fill(Path(ellipseIn: rect), with: .color(AgentStatusRing.thinking))
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+private struct AgentCornerRing: View {
+    var mark: AgentCornerMark
+    var color: Color
+
+    var body: some View {
+        Canvas { context, size in
+            let layout = AgentRingLayout(size: size)
+            context.stroke(
+                layout.ringPath(),
+                with: .color(color),
+                style: StrokeStyle(lineWidth: layout.stroke, lineCap: .round, lineJoin: .round)
+            )
+            let badge = layout.point(angle: layout.gapCenter, radius: layout.radius)
+            var path = Path()
+            let arm = layout.mark
+            switch mark {
+            case .cross:
+                path.move(to: CGPoint(x: badge.x - arm, y: badge.y - arm))
+                path.addLine(to: CGPoint(x: badge.x + arm, y: badge.y + arm))
+                path.move(to: CGPoint(x: badge.x + arm, y: badge.y - arm))
+                path.addLine(to: CGPoint(x: badge.x - arm, y: badge.y + arm))
+            case .check:
+                path.move(to: CGPoint(x: badge.x - arm, y: badge.y + arm * 0.08))
+                path.addLine(to: CGPoint(x: badge.x - arm * 0.28, y: badge.y + arm * 0.78))
+                path.addLine(to: CGPoint(x: badge.x + arm * 1.08, y: badge.y - arm * 0.82))
+            }
+            context.stroke(
+                path,
+                with: .color(color),
+                style: StrokeStyle(lineWidth: layout.stroke, lineCap: .round, lineJoin: .round)
+            )
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+private enum AgentCornerMark {
+    case cross
+    case check
+}
+
+/// Circle just outside the 28pt icon, inside the 44pt row. Angles are y-down: 0 is right, π/4 is bottom-right.
+private struct AgentRingLayout {
+    var size: CGSize
+
+    var unit: CGFloat { min(size.width, size.height) / AppConfig.agentRow }
+    var center: CGPoint { CGPoint(x: size.width / 2, y: size.height / 2) }
+    var radius: CGFloat { 19.15 * unit }
+    var stroke: CGFloat { 1.9 * unit }
+    var dot: CGFloat { 2.7 * unit }
+    var dotCount: Int { 10 }
+    var period: Double { 2.4 }
+    var gapCenter: CGFloat { .pi / 4 }
+    var gap: CGFloat { 58 * .pi / 180 }
+    var mark: CGFloat { 2.85 * unit }
+
+    func point(angle: CGFloat, radius: CGFloat) -> CGPoint {
+        CGPoint(x: center.x + cos(angle) * radius, y: center.y + sin(angle) * radius)
+    }
+
+    /// Long arc that stops before the bottom-right, leaving the mark's notch.
+    func ringPath() -> Path {
+        let start = gapCenter + gap / 2
+        let sweep = 2 * CGFloat.pi - gap
+        let steps = 96
+        var path = Path()
+        for step in 0...steps {
+            let angle = start + sweep * CGFloat(step) / CGFloat(steps)
+            let next = point(angle: angle, radius: radius)
+            if step == 0 {
+                path.move(to: next)
+            } else {
+                path.addLine(to: next)
+            }
+        }
+        return path
+    }
+}
+
 enum AgentIcon {
     static func image(source: String) -> NSImage? {
         let plan = AgentLaunch.plan(source: source)

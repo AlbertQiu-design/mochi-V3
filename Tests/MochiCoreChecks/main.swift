@@ -80,6 +80,41 @@ func MoodsMatchTheOldThresholds() {
         _ = happy
     }
 
+func HoverLinesMatchEachState() {
+    let now = 1_000_000.0
+    let happy = PetState(lastDecayTs: now)
+    check(PetEngine.hoverLine(happy, now: now) == "心情正好。")
+    check(PetEngine.snapshot(happy, now: now)["hover"] as? String == "心情正好。")
+
+    let playful = PetState(hunger: 30, energy: 50, lastDecayTs: now, lastAction: "play", lastActionTs: now)
+    check(PetEngine.hoverLine(playful, now: now) == "想玩一会儿。")
+
+    let sleepy = PetState(hunger: 30, energy: 20, lastDecayTs: now)
+    check(PetEngine.hoverLine(sleepy, now: now) == "有点困了。")
+
+    let hungry = PetState(hunger: 60, energy: 70, lastDecayTs: now)
+    check(PetEngine.hoverLine(hungry, now: now) == "肚子有点空。")
+
+    let angry = PetState(hunger: 60, energy: 50, lastDecayTs: now, lastAction: "play", lastActionTs: now)
+    check(PetEngine.hoverLine(angry, now: now) == "想自己待一会儿。")
+
+    let asleep = PetState(hunger: 30, energy: 20, asleep: true, lastDecayTs: now)
+    check(PetEngine.mood(asleep, now: now) == "sleepy")
+    check(PetEngine.hoverLine(asleep, now: now) == "在睡觉。")
+
+    let fed = PetState(hunger: 30, energy: 70, lastDecayTs: now, lastAction: "feed", lastActionTs: now)
+    check(PetEngine.hoverLine(fed, now: now) == "吃到啦。")
+    check(PetEngine.hoverLine(fed, now: now + PetRules.moodActionHold) == "心情正好。")
+
+    let lines = ["心情正好。", "想玩一会儿。", "有点困了。", "肚子有点空。", "想自己待一会儿。", "在睡觉。", "吃到啦。"]
+    check(Set(lines).count == lines.count)
+    for line in lines {
+        check(!line.contains("新宠物"))
+        check(!line.contains("死"))
+        check(!line.contains("对不起"))
+    }
+}
+
 func LegacyDeadSaveBecomesAsleep() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -190,24 +225,49 @@ func TaskWatchFiresWhenTheFileIsReplaced() throws {
             try FileManager.default.moveItem(at: temp, to: file)
         }
     }
-    func waitForIncrease(from seen: Int) -> Bool {
-        var attempts = 0
-        let deadline = Date().addingTimeInterval(1.5)
-        while count() == seen && Date() < deadline {
-            if attempts < 2 {
-                try? replace("n-\(seen)-\(attempts)")
-                attempts += 1
-                Thread.sleep(forTimeInterval: 0.08)
-            } else {
-                Thread.sleep(forTimeInterval: 0.02)
-            }
+    func waitUntil(_ seen: Int, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while count() <= seen && Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.01)
         }
         return count() > seen
     }
-    Thread.sleep(forTimeInterval: 0.15)
-    check(waitForIncrease(from: 0))
-    check(waitForIncrease(from: count()))
+    Thread.sleep(forTimeInterval: 0.2)
+    try replace("once")
+    check(waitUntil(0, timeout: 0.5))
+    Thread.sleep(forTimeInterval: 0.08)
+    let afterFirst = count()
+    try Data("[]".utf8).write(to: directory.appendingPathComponent("other.json"))
+    Thread.sleep(forTimeInterval: 0.08)
+    check(count() == afterFirst)
+    try replace("twice")
+    check(waitUntil(afterFirst, timeout: 0.5))
     watch.stop()
+}
+
+func BundleRefreshReplacesAnOlderProcess() {
+    let started = 1_000.0
+    check(BundleRefresh.settle >= 1)
+    check(BundleRefresh.isNewer(processStarted: started, executableModified: started) == false)
+    check(BundleRefresh.isNewer(processStarted: started, executableModified: started + 0.4) == false)
+    check(BundleRefresh.isNewer(processStarted: started, executableModified: started + 2))
+}
+
+func TranscriptHintsStayOffTheHotPath() {
+    check(TranscriptHints.refreshInterval >= 5)
+    check(TranscriptHints.due(lastScan: 0, now: 10, enabled: false) == false)
+    check(TranscriptHints.due(lastScan: 0, now: 10, enabled: true))
+    check(TranscriptHints.due(lastScan: 10, now: 10 + TranscriptHints.refreshInterval - 0.1, enabled: true) == false)
+    check(TranscriptHints.due(lastScan: 10, now: 10 + TranscriptHints.refreshInterval, enabled: true))
+    let file = [CursorTask(id: "a", title: "A", status: "running")]
+    let hints = [
+        CursorTask(id: "b", title: "B", status: "running"),
+        CursorTask(id: "a", title: "other", status: "running")
+    ]
+    let off = TranscriptHints.merge(file, hints: hints, enabled: false)
+    check(off.map(\.id) == ["a"])
+    let on = TranscriptHints.merge(file, hints: hints, enabled: true)
+    check(on.map(\.id) == ["a", "b"])
 }
 
 func ReplyWriterOnlyAllowsPermissionActions() throws {
@@ -356,7 +416,7 @@ func KittenPositionParsesAndClamps() throws {
     check(legacy.kittenPlaced == false)
 }
 
-func SpecConstantsAndShellGeometry() {
+func SpecConstantsAndShellGeometry() throws {
     check(AppConfig.materialAPI == "glassEffect.regular")
     check(AppConfig.bubbleRadius == 12)
     check(AppConfig.beakWidth == 10)
@@ -609,6 +669,31 @@ func SpecConstantsAndShellGeometry() {
     for name in IslandPrefs.soundIDs {
         check(ToneSynth.peak(name) > 0.05)
     }
+    let freshCues = IslandPrefs()
+    check(freshCues.soundSubmit == "glass")
+    check(freshCues.soundDone == "chime")
+    check(freshCues.soundStuck == "drop")
+    let chosen = IslandPrefs.parse([
+        "sound_submit": "ripple",
+        "sound_done": "spark",
+        "sound_stuck": "hush"
+    ])
+    check(chosen.soundSubmit == "ripple")
+    check(chosen.soundDone == "spark")
+    check(chosen.soundStuck == "hush")
+    let keptCue = IslandPrefs.parse(["sound_submit": "nope"], base: IslandPrefs(soundSubmit: "ping"))
+    check(keptCue.soundSubmit == "ping")
+    check(chosen.dictionary["sound_submit"] as? String == "ripple")
+    check(IslandPrefs.parse(chosen.dictionary).soundDone == "spark")
+    for name in IslandPrefs.submitSounds + IslandPrefs.doneSounds + IslandPrefs.stuckSounds {
+        check(ToneSynth.peak(name) > 0.05)
+        check(ToneSynth.recipe(name).isEmpty == false)
+    }
+    let legacyCues = try JSONDecoder().decode(IslandPrefs.self, from: Data("{\"sound\":\"pop\"}".utf8))
+    check(legacyCues.sound == "pop")
+    check(legacyCues.soundSubmit == "glass")
+    check(legacyCues.soundDone == "chime")
+    check(legacyCues.soundStuck == "drop")
 }
 
 func AgentIconsStayOnePerConversation() {
@@ -709,6 +794,109 @@ func AgentIconsStayOnePerConversation() {
         )
     ])
     check(keptChoice.map(\.id) == ["choice"])
+    // Quiet conversations are not in progress. Seen or not, they leave.
+    // Unread finished work and unanswered waits stay. Fresh running stays even after it was opened.
+    let clock = 10_000.0
+    let quiet = clock - AppConfig.activeTaskWindow - 1
+    check(AgentIconList.isWorking(
+        AgentIconCandidate(id: "fresh", source: "cursor", title: "R", status: "running", read: true, updated: clock),
+        now: clock
+    ))
+    check(AgentIconList.isWorking(
+        AgentIconCandidate(id: "quiet", source: "cursor", title: "R", status: "running", read: false, updated: quiet),
+        now: clock
+    ) == false)
+    check(AgentIconList.shouldShow(
+        AgentIconCandidate(id: "fresh", source: "cursor", title: "R", status: "running", read: true, updated: clock),
+        now: clock
+    ))
+    check(AgentIconList.shouldShow(
+        AgentIconCandidate(id: "quiet-seen", source: "cursor", title: "R", status: "running", read: true, updated: quiet),
+        now: clock
+    ) == false)
+    check(AgentIconList.shouldShow(
+        AgentIconCandidate(id: "quiet-new", source: "cursor", title: "R", status: "running", read: false, updated: quiet),
+        now: clock
+    ) == false)
+    check(AgentIconList.shouldShow(
+        AgentIconCandidate(id: "unread-done", source: "cursor", title: "D", status: "done", read: false, updated: quiet),
+        now: clock
+    ))
+    check(AgentIconList.shouldShow(
+        AgentIconCandidate(id: "read-done", source: "cursor", title: "D", status: "done", read: true, updated: clock),
+        now: clock
+    ) == false)
+    check(AgentIconList.shouldShow(
+        AgentIconCandidate(id: "still-asking", source: "cursor", title: "W", status: "wait", read: true, updated: quiet),
+        now: clock
+    ))
+    let unified = AgentIconList.rows([
+        AgentIconCandidate(id: "fresh", source: "cursor", title: "R", status: "running", read: true, updated: clock),
+        AgentIconCandidate(id: "quiet", source: "cursor", title: "R", status: "running", read: false, updated: quiet),
+        AgentIconCandidate(id: "unread-done", source: "cursor", title: "D", status: "done", read: false, updated: quiet - 10),
+        AgentIconCandidate(id: "read-done", source: "cursor", title: "D", status: "done", read: true, updated: quiet),
+        AgentIconCandidate(id: "ask", source: "codex", title: "W", status: "wait", read: true, updated: quiet)
+    ], now: clock)
+    check(unified.map(\.id) == ["fresh", "unread-done", "ask"])
+    let stale = clock - AppConfig.iconMaxAge - 1
+    check(AgentIconList.isExpired(
+        AgentIconCandidate(id: "old", source: "cursor", title: "W", status: "wait", read: false, updated: stale),
+        now: clock
+    ))
+    check(AgentIconList.shouldShow(
+        AgentIconCandidate(id: "old-wait", source: "cursor", title: "W", status: "wait", read: false, updated: stale, hasPendingOptions: true),
+        holding: ["old-wait"],
+        now: clock
+    ) == false)
+    check(AgentIconList.shouldShow(
+        AgentIconCandidate(id: "old-done", source: "cursor", title: "D", status: "done", read: false, updated: stale),
+        now: clock
+    ) == false)
+    check(AgentIconList.shouldShow(
+        AgentIconCandidate(id: "young-done", source: "cursor", title: "D", status: "done", read: false, updated: clock - AppConfig.iconMaxAge + 10),
+        now: clock
+    ))
+    let aged = AgentIconList.rows([
+        AgentIconCandidate(id: "fresh", source: "cursor", title: "R", status: "running", read: true, updated: clock),
+        AgentIconCandidate(id: "old-ask", source: "cursor", title: "W", status: "wait", read: false, updated: stale, hasPendingOptions: true)
+    ], now: clock)
+    check(aged.map(\.id) == ["fresh"])
+}
+
+func QuestionBlurbShowsInEveryStatus() {
+    let question = "把状态环加回来"
+    for status in ["running", "wait", "done", "fail"] {
+        check(PermissionCopy.cardBlurb(
+            summary: question,
+            detail: "Chat",
+            kind: "",
+            status: status,
+            optionIDs: []
+        ) == question)
+        check(PermissionCopy.cardBlurb(
+            summary: question,
+            detail: "Shell",
+            kind: "permission",
+            status: status,
+            optionIDs: ["allow", "deny"]
+        ) == question)
+    }
+    check(PermissionCopy.cardBlurb(
+        summary: "",
+        detail: "Chat",
+        kind: "",
+        status: "running",
+        optionIDs: [],
+        title: question
+    ) == question)
+    check(PermissionCopy.cardBlurb(
+        summary: "",
+        detail: "Chat",
+        kind: "",
+        status: "done",
+        optionIDs: [],
+        title: "Cursor"
+    ).isEmpty)
 }
 
 func DockPrefDefaultsToRight() {
@@ -948,6 +1136,124 @@ func iconSources(_ outcome: HookOutcome?) -> [String] {
             updated: 20
         )
     ]).map(\.source)
+}
+
+func ChatSummarySurvivesLaterStatus() throws {
+    let fixture = "Show this card blurb"
+    let id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    let nestedPrompt: [String: Any] = ["text": fixture]
+    let nested = HookEvents.interpret(sourceFlag: nil, payload: [
+        "hook_event_name": "BeforeSubmitPrompt",
+        "conversation_id": "nested-chat",
+        "prompt": nestedPrompt
+    ])
+    check(nested?.status == "running")
+    check(nested?.detail == "Chat")
+    check(nested?.summary == fixture)
+    check(nested?.promptSubmitted == true)
+    let part: [String: Any] = ["type": "text", "text": fixture]
+    let partsPrompt: [Any] = [part]
+    let parts = HookEvents.interpret(sourceFlag: nil, payload: [
+        "hook_event_name": "beforeSubmitPrompt",
+        "conversation_id": "parts-chat",
+        "prompt": partsPrompt
+    ])
+    check(parts?.summary == fixture)
+    let wrappedPrompt: [String: Any] = ["content": fixture]
+    let wrappedInput: [String: Any] = ["prompt": wrappedPrompt]
+    let wrapped = HookEvents.interpret(sourceFlag: nil, payload: [
+        "hook_event_name": "before_submit_prompt",
+        "conversation_id": "wrapped-chat",
+        "input": wrappedInput
+    ])
+    check(wrapped?.summary == fixture)
+    check(wrapped?.detail == "Chat")
+
+    let longFixture = String(repeating: "blurb ", count: 12)
+    let submit = HookEvents.interpret(sourceFlag: nil, payload: [
+        "hook_event_name": "beforeSubmitPrompt",
+        "conversation_id": id,
+        "prompt": longFixture
+    ])
+    let stored = PermissionCopy.abbreviate(longFixture)
+    check(submit?.summary == stored)
+    check((submit?.summary.count ?? 0) <= 40)
+    check(submit?.summary.contains(longFixture) == false)
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent("mochi-summary-\(UUID().uuidString).json")
+    HookEvents.commit(submit!, tasksURL: url, now: 10)
+    let heartbeat = HookEvents.interpret(sourceFlag: nil, payload: [
+        "hook_event_name": "afterAgentResponse",
+        "conversation_id": id,
+        "text": "assistant reply stays out"
+    ])
+    check(heartbeat?.summary == "")
+    check(heartbeat?.promptSubmitted == false)
+    HookEvents.commit(heartbeat!, tasksURL: url, now: 11)
+    let done = HookEvents.interpret(sourceFlag: nil, payload: [
+        "hook_event_name": "sessionEnd",
+        "conversation_id": id,
+        "prompt": "should not replace the blurb"
+    ])
+    check(done?.status == "done")
+    check(done?.summary == "")
+    HookEvents.commit(done!, tasksURL: url, now: 12)
+    let root = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any]
+    let tasks = root?["tasks"] as? [String: Any]
+    let record = tasks?[id] as? [String: Any]
+    check(record?["status"] as? String == "done")
+    check(record?["summary"] as? String == stored)
+    check(record?["prompt"] == nil)
+    let text = String(data: try Data(contentsOf: url), encoding: .utf8) ?? ""
+    check(text.contains(longFixture) == false)
+    check(text.contains("assistant reply stays out") == false)
+    check(text.contains("should not replace the blurb") == false)
+    let shown = TaskReader.load(tasksURL: url, now: 13, includePrompts: true)
+    check(shown.first { $0.id == id }?.summary == stored)
+    check(PermissionCopy.cardBlurb(
+        summary: stored,
+        detail: "Chat",
+        kind: "",
+        status: "done",
+        optionIDs: []
+    ) == stored)
+
+    let parent = "11111111-2222-3333-4444-555555555555"
+    let child = "22222222-3333-4444-5555-666666666666"
+    var live: [String: Any] = [:]
+    let parentSubmit = HookEvents.interpret(sourceFlag: nil, payload: [
+        "hook_event_name": "beforeSubmitPrompt",
+        "conversation_id": parent,
+        "prompt": fixture
+    ])!
+    HookEvents.merge(parentSubmit, into: &live, now: 1)
+    let childStart = HookEvents.interpret(sourceFlag: nil, payload: [
+        "hook_event_name": "subagentStart",
+        "conversation_id": parent,
+        "subagent_id": child,
+        "task": "Subagent fixture task",
+        "summary": "Agent output fixture stays out"
+    ])
+    check(childStart?.id == child)
+    check(childStart?.summary == "Subagent fixture task")
+    check(childStart?.promptSubmitted == false)
+    HookEvents.merge(childStart!, into: &live, now: 2)
+    check((live[parent] as? [String: Any])?["summary"] as? String == fixture)
+    check((live[child] as? [String: Any])?["summary"] as? String == "Subagent fixture task")
+    let childDone = HookEvents.interpret(sourceFlag: nil, payload: [
+        "hook_event_name": "subagentStop",
+        "conversation_id": parent,
+        "subagent_id": child,
+        "task": "",
+        "summary": "Agent output fixture stays out"
+    ])
+    check(childDone?.summary == "")
+    check(childDone?.status == "done")
+    HookEvents.merge(childDone!, into: &live, now: 3)
+    check((live[child] as? [String: Any])?["status"] as? String == "done")
+    check((live[child] as? [String: Any])?["summary"] as? String == "Subagent fixture task")
+    check((live[parent] as? [String: Any])?["summary"] as? String == fixture)
+    let blob = String(data: try JSONSerialization.data(withJSONObject: live), encoding: .utf8) ?? ""
+    check(blob.contains("Agent output fixture stays out") == false)
 }
 
 func SubmittedChatKeepsTheAgentAndDropsThePrompt() throws {
@@ -1831,6 +2137,116 @@ func ConnectorRegistryNamesCursorAndCodex() {
     check(AgentConnectorRegistry.connector(for: "claude") == nil)
 }
 
+func TaskCuesPlayOncePerTransition() throws {
+    var tracker = TaskCueTracker()
+    let running = TaskCueEvent(id: "a", status: "running", submitGen: 0, updated: 1)
+    check(tracker.observe([running]).isEmpty)
+    check(tracker.primed)
+    check(tracker.observe([running]).isEmpty)
+
+    let submitted = TaskCueEvent(id: "a", status: "running", submitGen: 1, updated: 2)
+    check(tracker.observe([submitted]) == [.submit])
+    check(tracker.observe([submitted]).isEmpty)
+
+    let waiting = TaskCueEvent(id: "a", status: "wait", submitGen: 1, updated: 3)
+    check(tracker.observe([waiting]) == [.stuck])
+    let allowed = TaskCueEvent(id: "a", status: "running", submitGen: 1, updated: 4)
+    check(tracker.observe([allowed]).isEmpty)
+
+    let done = TaskCueEvent(id: "a", status: "done", submitGen: 1, updated: 5)
+    check(tracker.observe([done]) == [.complete])
+    check(tracker.observe([done]).isEmpty)
+
+    let failed = TaskCueEvent(id: "b", status: "fail", submitGen: 0, updated: 6)
+    check(tracker.observe([failed]) == [.stuck])
+    check(tracker.observe([failed]).isEmpty)
+
+    let started = TaskCueEvent(id: "c", status: "running", submitGen: 0, updated: 7)
+    check(tracker.observe([started]).isEmpty)
+    let fresh = TaskCueEvent(id: "d", status: "running", submitGen: 1, updated: 8)
+    check(tracker.observe([fresh]) == [.submit])
+    let again = TaskCueEvent(id: "d", status: "running", submitGen: 2, updated: 9)
+    check(tracker.observe([again]) == [.submit])
+
+    let early = TaskCueEvent(id: "early", status: "wait", submitGen: 0, updated: 10)
+    let late = TaskCueEvent(id: "late", status: "done", submitGen: 1, updated: 20)
+    check(tracker.observe([early, late]) == [.complete, .stuck])
+
+    let id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+    let submit = HookEvents.interpret(sourceFlag: nil, payload: [
+        "hook_event_name": "beforeSubmitPrompt",
+        "conversation_id": id,
+        "prompt": "ship the cue"
+    ])
+    check(submit?.promptSubmitted == true)
+    check(submit?.status == "running")
+    var tasks: [String: Any] = [:]
+    HookEvents.merge(submit!, into: &tasks, now: 1)
+    check((tasks[id] as? [String: Any])?["submit_gen"] as? Int == 1)
+
+    let empty = HookEvents.interpret(sourceFlag: nil, payload: [
+        "hook_event_name": "beforeSubmitPrompt",
+        "conversation_id": id,
+        "prompt": ""
+    ])
+    check(empty?.promptSubmitted == false)
+    HookEvents.merge(empty!, into: &tasks, now: 2)
+    check((tasks[id] as? [String: Any])?["submit_gen"] as? Int == 1)
+
+    let session = HookEvents.interpret(sourceFlag: nil, payload: [
+        "hook_event_name": "sessionStart",
+        "conversation_id": id
+    ])
+    check(session?.promptSubmitted == false)
+    HookEvents.merge(session!, into: &tasks, now: 3)
+    check((tasks[id] as? [String: Any])?["submit_gen"] as? Int == 1)
+
+    let shell = HookEvents.interpret(sourceFlag: nil, payload: [
+        "hook_event_name": "beforeShellExecution",
+        "conversation_id": id,
+        "command": "echo hi"
+    ])
+    check(shell?.promptSubmitted == false)
+    HookEvents.merge(shell!, into: &tasks, now: 4)
+    check((tasks[id] as? [String: Any])?["status"] as? String == "wait")
+    check((tasks[id] as? [String: Any])?["submit_gen"] as? Int == 1)
+
+    let follow = HookEvents.interpret(sourceFlag: nil, payload: [
+        "hook_event_name": "UserPromptSubmit",
+        "conversation_id": id,
+        "prompt": "once more"
+    ])
+    check(follow?.promptSubmitted == true)
+    HookEvents.merge(follow!, into: &tasks, now: 5)
+    check((tasks[id] as? [String: Any])?["submit_gen"] as? Int == 2)
+    check((tasks[id] as? [String: Any])?["prompt"] == nil)
+
+    let beat = HookEvents.interpret(sourceFlag: nil, payload: [
+        "hook_event_name": "stop",
+        "conversation_id": id
+    ])
+    HookEvents.merge(beat!, into: &tasks, now: 6)
+    check((tasks[id] as? [String: Any])?["submit_gen"] as? Int == 2)
+
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent("mochi-cue-\(UUID().uuidString).json")
+    HookEvents.commit(submit!, tasksURL: url, now: 7)
+    let loaded = TaskReader.load(tasksURL: url, now: 8)
+    check(loaded.first { $0.id == id }?.submitGen == 1)
+
+    let glass = ToneSynth.render("glass")
+    let chime = ToneSynth.render("chime")
+    let drop = ToneSynth.render("drop")
+    check(glass != chime && chime != drop && glass != drop)
+    check(glass != ToneSynth.render("boop"))
+    check(chime != ToneSynth.render("chirp"))
+    check(drop != ToneSynth.render("pop"))
+    check(glass.count < 44_100 && chime.count < 44_100 && drop.count < 44_100)
+    check(ToneSynth.peak("glass") > 0.05)
+    check(ToneSynth.peak("chime") > 0.05)
+    check(ToneSynth.peak("drop") > 0.05)
+    check(IslandPrefs.soundIDs == ["boop", "chirp", "mew", "pop", "twinkle"])
+}
+
 func LiveHooksFixWhenAsked() {
         guard let binary = ProcessInfo.processInfo.environment["MOCHI_FIX_LIVE_HOOKS"], !binary.isEmpty else { return }
         let cursor = AppConfig.cursorDirectory
@@ -1854,16 +2270,19 @@ FeedFromAIWakesAndDedupes()
 FedTaskIDsStayBounded()
 LowHappinessDoesNotSleep()
 MoodsMatchTheOldThresholds()
+HoverLinesMatchEachState()
 try LegacyDeadSaveBecomesAsleep()
 try SaveClampsHunger()
 OnlyRunningToDoneFeeds()
 try HookInstallBacksUpAndMarksEntries()
 try TaskWatchFiresWhenTheFileIsReplaced()
+BundleRefreshReplacesAnOlderProcess()
+TranscriptHintsStayOffTheHotPath()
 try ReplyWriterOnlyAllowsPermissionActions()
 try TaskReaderKeepsSource()
 AgentLaunchFindsInstalledAppsAndCodexFallback()
 try KittenPositionParsesAndClamps()
-SpecConstantsAndShellGeometry()
+try SpecConstantsAndShellGeometry()
 AgentIconsStayOnePerConversation()
 DockPrefDefaultsToRight()
 try PickerFlagsPersistAcrossPrefs()
@@ -1876,11 +2295,14 @@ KittenV1FaceFilesFollowSource()
 SelectingKeepsOnlyKnownIds()
 NewWaitSelectsOnlyAfterTheFirstSnapshot()
 try SubmittedChatKeepsTheAgentAndDropsThePrompt()
+try ChatSummarySurvivesLaterStatus()
+QuestionBlurbShowsInEveryStatus()
 try AnsweredPermissionIsNotShownAgain()
 try CodexAndClaudeHooksInstallMarkedCommands()
 try HookRetargetPointsAtTheOpenApp()
 try PassiveHooksReportTheShortlist()
 try GeminiHookMapsTheShortlist()
 ConnectorRegistryNamesCursorAndCodex()
+try TaskCuesPlayOncePerTransition()
 LiveHooksFixWhenAsked()
 print("MochiCore checks passed")

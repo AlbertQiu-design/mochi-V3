@@ -8,6 +8,11 @@ public enum AppConfig {
     /// Unopened finished tasks stay listed for two weeks, including across a restart.
     public static let doneKeep: Double = 14 * 24 * 60 * 60
     public static let liveKeep: Double = 30 * 60
+    /// A running conversation is still being worked on only while a hook has touched it inside this window.
+    /// Quiet ones leave the capsule, the same way a finished chat leaves after it has been seen.
+    public static let activeTaskWindow: Double = 180
+    /// Capsule icons older than this leave, including unread finished chats and unanswered waits.
+    public static let iconMaxAge: Double = 24 * 60 * 60
 
     public static var homeDirectory: URL {
         #if os(macOS)

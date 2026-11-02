@@ -53,6 +53,47 @@ public enum ToneSynth {
                 Partial(.sine, frequency: 1319, start: 0, duration: 0.16, gain: 0.12),
                 Partial(.sine, frequency: 1976, start: 0.04, duration: 0.18, gain: 0.08)
             ]
+        case "glass":
+            // Light rising acknowledgment. Quiet glass, well under a second.
+            return [
+                Partial(.sine, frequency: 784, start: 0, duration: 0.14, gain: 0.09, slideTo: 1175),
+                Partial(.sine, frequency: 1568, start: 0.012, duration: 0.12, gain: 0.035, slideTo: 2349)
+            ]
+        case "ripple":
+            return [
+                Partial(.sine, frequency: 988, start: 0, duration: 0.06, gain: 0.1),
+                Partial(.sine, frequency: 1319, start: 0.05, duration: 0.08, gain: 0.09),
+                Partial(.sine, frequency: 1760, start: 0.1, duration: 0.12, gain: 0.06)
+            ]
+        case "ping":
+            return [Partial(.sine, frequency: 1480, start: 0, duration: 0.1, gain: 0.13, slideTo: 1760)]
+        case "chime":
+            // Warmer two-note completion, with a soft low partial under the second note.
+            return [
+                Partial(.sine, frequency: 523, start: 0, duration: 0.15, gain: 0.10),
+                Partial(.sine, frequency: 659, start: 0.10, duration: 0.18, gain: 0.09),
+                Partial(.sine, frequency: 262, start: 0.10, duration: 0.16, gain: 0.035)
+            ]
+        case "bloom":
+            return [
+                Partial(.sine, frequency: 784, start: 0, duration: 0.18, gain: 0.1),
+                Partial(.sine, frequency: 1175, start: 0.04, duration: 0.2, gain: 0.07)
+            ]
+        case "spark":
+            return [
+                Partial(.triangle, frequency: 1976, start: 0, duration: 0.05, gain: 0.09),
+                Partial(.sine, frequency: 1568, start: 0.04, duration: 0.12, gain: 0.1)
+            ]
+        case "drop":
+            // Softer falling tone. Quieter than the click sounds, and not an alarm.
+            return [
+                Partial(.sine, frequency: 698, start: 0, duration: 0.24, gain: 0.08, slideTo: 440),
+                Partial(.sine, frequency: 349, start: 0.02, duration: 0.22, gain: 0.03, slideTo: 220)
+            ]
+        case "thud":
+            return [Partial(.triangle, frequency: 240, start: 0, duration: 0.1, gain: 0.15, slideTo: 140)]
+        case "hush":
+            return [Partial(.sine, frequency: 880, start: 0, duration: 0.2, gain: 0.09, slideTo: 440)]
         default:
             return [Partial(.sine, frequency: 880, start: 0, duration: 0.12, gain: 0.16, slideTo: 420)]
         }

@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import MochiCore
 import ServiceManagement
 import WebKit
@@ -137,9 +138,13 @@ final class IslandController: NSObject, WKScriptMessageHandler, WKNavigationDele
                 self?.deliverTasksIfChanged()
             }
         }
-        let poll = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+        session.refreshTranscriptHintsIfDue { [weak self] changed in
+            if changed { self?.deliverTasks() }
+        }
+        // The file watch is the fast path. This poll only covers a missed replace.
+        let poll = Timer(timeInterval: 5, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
-                self?.deliverTasksIfChanged()
+                self?.pollTasks()
             }
         }
         taskPoll = poll
@@ -209,10 +214,14 @@ final class IslandController: NSObject, WKScriptMessageHandler, WKNavigationDele
         case "glass":
             syncGlass(body["rects"])
         case "getState":
-            reply(requestID, session.statePayload())
+            let state = session.statePayload()
+            capsule.setHoverLine(state["hover"] as? String ?? "")
+            reply(requestID, state)
             deliverTasksIfChanged()
         case "play":
-            reply(requestID, session.play())
+            let played = session.play()
+            capsule.setHoverLine(played["hover"] as? String ?? "")
+            reply(requestID, played)
         case "getTasks":
             reply(requestID, session.tasksPayload())
             deliverTasksIfChanged()
@@ -241,6 +250,13 @@ final class IslandController: NSObject, WKScriptMessageHandler, WKNavigationDele
         case "setScan":
             session.setScanTranscripts(body["enabled"] as? Bool ?? false)
             reply(requestID, ["ok": true, "scanTranscripts": session.currentPrefs.scanTranscripts])
+            if session.currentPrefs.scanTranscripts {
+                session.refreshTranscriptHintsIfDue { [weak self] changed in
+                    if changed { self?.deliverTasks() }
+                }
+            } else {
+                deliverTasks()
+            }
         case "createSlot":
             let created = session.createSlot(source: body["source"] as? String ?? "")
             refreshCapsule()
@@ -306,7 +322,15 @@ final class IslandController: NSObject, WKScriptMessageHandler, WKNavigationDele
             return self.session.linkPayload(agent: agent, action: action, acknowledged: acknowledged)
         }
         settings.onScan = { [weak self] enabled in
-            self?.session.setScanTranscripts(enabled)
+            guard let self else { return }
+            self.session.setScanTranscripts(enabled)
+            if enabled {
+                self.session.refreshTranscriptHintsIfDue { [weak self] changed in
+                    if changed { self?.deliverTasks() }
+                }
+            } else {
+                self.deliverTasks()
+            }
         }
         settings.onReset = { [weak self] in
             guard let self else { return }
@@ -333,8 +357,12 @@ final class IslandController: NSObject, WKScriptMessageHandler, WKNavigationDele
     }
 
     private func refreshCapsule() {
-        let state = session.statePayload()
-        let tasks = session.tasksPayload()
+        let live = session.liveSnapshot()
+        applyCapsule(state: live.state, tasks: live.tasks)
+    }
+
+    private func applyCapsule(state: [String: Any], tasks: [[String: Any]]) {
+        capsule.setHoverLine(state["hover"] as? String ?? "")
         let selected = state["selected"] as? String ?? ""
         capsule.apply(prefs: session.currentPrefs)
         capsule.sync(
@@ -347,8 +375,14 @@ final class IslandController: NSObject, WKScriptMessageHandler, WKNavigationDele
         publishCapsule()
     }
 
-    /// Finished chats may chime once. Running / waiting stay silent in the capsule —
-    /// the icon shows them; the user opens the card by clicking.
+    private func pollTasks() {
+        deliverTasksIfChanged()
+        session.refreshTranscriptHintsIfDue { [weak self] changed in
+            if changed { self?.deliverTasks() }
+        }
+    }
+
+    /// Finished chats open once. Submit, done, and stuck cues play on the status change.
     private func considerAlerts(tasks: [[String: Any]], slots: [[String: Any]]) {
         var read: [String: Bool] = [:]
         for slot in slots {
@@ -421,13 +455,14 @@ final class IslandController: NSObject, WKScriptMessageHandler, WKNavigationDele
 
     private func deliverTasks() {
         taskStamp = taskWatch.stamp()
-        let state = Self.jsonString(session.statePayload())
-        let tasks = Self.jsonString(session.tasksPayload())
+        let live = session.liveSnapshot()
+        let state = Self.jsonString(live.state)
+        let tasks = Self.jsonString(live.tasks)
         webView.evaluateJavaScript(
             "window.pushTasks && window.pushTasks(\(tasks), \(state));",
             completionHandler: nil
         )
-        refreshCapsule()
+        applyCapsule(state: live.state, tasks: live.tasks)
     }
 
     private func injectPageState() {
@@ -493,6 +528,7 @@ final class IslandController: NSObject, WKScriptMessageHandler, WKNavigationDele
 
     private func syncMousePassthrough() {
         let screenMouse = NSEvent.mouseLocation
+        capsule.noteHover(at: screenMouse)
         settings.panel.ignoresMouseEvents = !settings.isVisible
         capsule.panel.ignoresMouseEvents = capsule.ignoresPointer(at: screenMouse)
         if capsule.containsScreenPoint(screenMouse) {
@@ -646,6 +682,10 @@ final class IslandController: NSObject, WKScriptMessageHandler, WKNavigationDele
 final class Runtime: NSObject, NSApplicationDelegate {
     static let shared = Runtime()
     let island = IslandController()
+    private let booted = Date()
+    private var executableWatch: TaskFileWatch?
+    private var relaunchWork: DispatchWorkItem?
+    private var replacing = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard Self.claimSingleInstance() else {
@@ -657,6 +697,7 @@ final class Runtime: NSObject, NSApplicationDelegate {
             NSApp.applicationIconImage = icon
         }
         island.start()
+        watchExecutable()
         if CommandLine.arguments.contains("--show-settings") {
             let raw = CommandLine.arguments
                 .first(where: { $0.hasPrefix("--settings-tab=") })?
@@ -672,6 +713,50 @@ final class Runtime: NSObject, NSApplicationDelegate {
             }
             island.revealSettings(tab: tab)
         }
+    }
+
+    /// A newer `MochiIsland` binary on disk replaces this process. The build copies
+    /// over the executable, so the running image would otherwise stay the old one.
+    private func watchExecutable() {
+        guard let executable = Bundle.main.executableURL else { return }
+        let watch = TaskFileWatch(fileURL: executable)
+        executableWatch = watch
+        watch.start { [weak self] in
+            DispatchQueue.main.async {
+                self?.scheduleRelaunch()
+            }
+        }
+    }
+
+    private func scheduleRelaunch() {
+        relaunchWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.relaunchIfNewer()
+        }
+        relaunchWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + BundleRefresh.settle, execute: work)
+    }
+
+    private func relaunchIfNewer() {
+        guard !replacing, let executable = Bundle.main.executableURL else { return }
+        let modified = (try? executable.resourceValues(forKeys: [.contentModificationDateKey]))?
+            .contentModificationDate?
+            .timeIntervalSince1970 ?? 0
+        guard BundleRefresh.isNewer(
+            processStarted: booted.timeIntervalSince1970,
+            executableModified: modified
+        ) else { return }
+        let process = Process()
+        process.executableURL = executable
+        process.arguments = ["--replace-pid", String(ProcessInfo.processInfo.processIdentifier)]
+        replacing = true
+        do {
+            try process.run()
+        } catch {
+            replacing = false
+            return
+        }
+        NSApp.terminate(nil)
     }
 
     private static func claimSingleInstance() -> Bool {
@@ -693,6 +778,12 @@ final class Runtime: NSObject, NSApplicationDelegate {
 @main
 enum MochiIsland {
     static func main() {
+        if let pid = replacePID() {
+            let deadline = Date().addingTimeInterval(8)
+            while kill(pid, 0) == 0, Date() < deadline {
+                Thread.sleep(forTimeInterval: 0.05)
+            }
+        }
         if CommandLine.arguments.contains("--measure-latency") {
             let app = NSApplication.shared
             app.setActivationPolicy(.accessory)
@@ -704,5 +795,11 @@ enum MochiIsland {
         app.delegate = Runtime.shared
         app.setActivationPolicy(.regular)
         app.run()
+    }
+
+    private static func replacePID() -> pid_t? {
+        let args = CommandLine.arguments
+        guard let index = args.firstIndex(of: "--replace-pid"), index + 1 < args.count else { return nil }
+        return pid_t(args[index + 1])
     }
 }

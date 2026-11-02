@@ -44,6 +44,16 @@ enum SettingsChromeMetrics {
     /// Room for the traffic lights inside the rounded glass, above the tabs.
     static let titleRow: CGFloat = 46
     static let cornerRadius: CGFloat = 28
+    /// Standard window-button frame. The drawn circle sits inside this.
+    static let trafficFrame: CGFloat = 14
+    /// Gap between the close, minimize, and zoom frames.
+    static let trafficSpacing: CGFloat = 6
+    /// Flat glass between where the corner arc ends and the close button.
+    /// The arc owns the top-left `cornerRadius` points, so the button starts past it.
+    static let trafficCornerGap: CGFloat = 10
+    static var trafficLeading: CGFloat { cornerRadius + trafficCornerGap }
+    /// Clear of the top edge once the button is past the arc.
+    static let trafficTop: CGFloat = 16
 }
 
 @MainActor
@@ -115,6 +125,7 @@ final class SettingsChrome: NSObject, NSWindowDelegate {
         let hosting = SettingsHostingView(rootView: SettingsRoot(model: model))
         hosting.sizingOptions = []
         hosting.wantsLayer = true
+        hosting.layer?.isOpaque = false
         hosting.layer?.backgroundColor = NSColor.clear.cgColor
         let buttons = SettingsButtonHost(frame: NSRect(x: 0, y: 0, width: Self.width, height: Self.height))
         hosting.frame = buttons.bounds
@@ -233,6 +244,9 @@ final class SettingsModel: ObservableObject {
     @Published var tab: SettingsTab = .general
     @Published var selectionMoving = false
     @Published var sound = "boop"
+    @Published var soundSubmit = IslandPrefs.submitSounds[0]
+    @Published var soundDone = IslandPrefs.doneSounds[0]
+    @Published var soundStuck = IslandPrefs.stuckSounds[0]
     @Published var cursorConnected = false
     @Published var codexConnected = false
     @Published var claudeConnected = false
@@ -275,6 +289,9 @@ final class SettingsModel: ObservableObject {
 
     func apply(prefs: IslandPrefs, link: [String: Any]) {
         sound = IslandPrefs.soundIDs.contains(prefs.sound) ? prefs.sound : "boop"
+        soundSubmit = IslandPrefs.submitSounds.contains(prefs.soundSubmit) ? prefs.soundSubmit : IslandPrefs.submitSounds[0]
+        soundDone = IslandPrefs.doneSounds.contains(prefs.soundDone) ? prefs.soundDone : IslandPrefs.doneSounds[0]
+        soundStuck = IslandPrefs.stuckSounds.contains(prefs.soundStuck) ? prefs.soundStuck : IslandPrefs.stuckSounds[0]
         petScale = prefs.petScale
         look = IslandPrefs.normalizeLook(prefs.look)
         launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -351,6 +368,9 @@ final class SettingsModel: ObservableObject {
         )
         onPrefs?([
             "sound": sound,
+            "sound_submit": soundSubmit,
+            "sound_done": soundDone,
+            "sound_stuck": soundStuck,
             "look": look,
             "pet_scale": petScale,
             "picker_cursor": pickerCursor,
@@ -554,7 +574,12 @@ struct SettingsRoot: View {
             }
             Section {
                 LabeledContent("Version", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")
-                LabeledContent("Build", value: Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "2")
+                LabeledContent("Build", value: Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "3")
+                Text(Bundle.main.bundleURL.path)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .formStyle(.grouped)
@@ -645,12 +670,55 @@ struct SettingsRoot: View {
                     }
                 }
                 .pickerStyle(.segmented)
-                Text("Plays when you click the kitten, pick an agent, or hear an alert. A muted Mac stays quiet.")
+                Text("Plays when you click the kitten or pick an agent. A muted Mac stays quiet.")
                     .foregroundStyle(.secondary)
             }
+            cueSection(
+                "Submitted",
+                note: "Plays once when a chat is sent. A muted Mac stays quiet.",
+                options: IslandPrefs.submitSounds,
+                value: \.soundSubmit
+            )
+            cueSection(
+                "Finished",
+                note: "Plays once when a task finishes.",
+                options: IslandPrefs.doneSounds,
+                value: \.soundDone
+            )
+            cueSection(
+                "Stuck",
+                note: "Plays once when a task is waiting or fails.",
+                options: IslandPrefs.stuckSounds,
+                value: \.soundStuck
+            )
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
+    }
+
+    private func cueSection(
+        _ title: String,
+        note: String,
+        options: [String],
+        value: ReferenceWritableKeyPath<SettingsModel, String>
+    ) -> some View {
+        Section(title) {
+            Picker(title, selection: Binding(
+                get: { model[keyPath: value] },
+                set: { next in
+                    model[keyPath: value] = next
+                    model.persist()
+                    SoundPlayer.shared.playPreview(next)
+                }
+            )) {
+                ForEach(options, id: \.self) { id in
+                    Text(id.capitalized).tag(id)
+                }
+            }
+            .pickerStyle(.segmented)
+            Text(note)
+                .foregroundStyle(.secondary)
+        }
     }
 
     private var agentsPane: some View {
@@ -730,11 +798,9 @@ struct SettingsRoot: View {
         .frame(width: SettingsChrome.width, height: SettingsChrome.height)
 }
 
-/// Close, minimize, and zoom drawn inside the glass, clear of the rounded corner.
+/// Close, minimize, and zoom drawn inside the glass, past the rounded corner.
 final class SettingsButtonHost: NSView {
     private var traffic: [NSButton] = []
-    private let topInset: CGFloat = 16
-    private let leading: CGFloat = 20
 
     override func layout() {
         super.layout()
@@ -749,6 +815,8 @@ final class SettingsButtonHost: NSView {
                 guard let button = NSWindow.standardWindowButton(kind, for: mask) else { continue }
                 button.isHidden = false
                 button.isEnabled = true
+                button.translatesAutoresizingMaskIntoConstraints = true
+                button.autoresizingMask = []
                 addSubview(button)
                 traffic.append(button)
             }
@@ -769,14 +837,15 @@ final class SettingsButtonHost: NSView {
     }
 
     func placeButtons() {
-        var x = leading
+        var x = SettingsChromeMetrics.trafficLeading
+        let top = SettingsChromeMetrics.trafficTop
         for button in traffic {
             let fitted = button.fittingSize
-            let width = max(fitted.width, 14)
-            let height = max(fitted.height, 14)
-            let y = bounds.height - topInset - height
+            let width = max(fitted.width, SettingsChromeMetrics.trafficFrame)
+            let height = max(fitted.height, SettingsChromeMetrics.trafficFrame)
+            let y = bounds.height - top - height
             button.frame = NSRect(x: x, y: y, width: width, height: height)
-            x += width + 6
+            x += width + SettingsChromeMetrics.trafficSpacing
         }
     }
 }
@@ -790,7 +859,11 @@ final class SettingsHostingView<Content: View>: NSHostingView<Content> {
     override func hitTest(_ point: NSPoint) -> NSView? {
         let local = convert(point, from: superview)
         let stripHeight = SettingsChromeMetrics.titleRow
-        let strip = NSRect(x: 0, y: bounds.height - stripHeight, width: 130, height: stripHeight)
+        let stripWidth = SettingsChromeMetrics.trafficLeading
+            + SettingsChromeMetrics.trafficFrame * 3
+            + SettingsChromeMetrics.trafficSpacing * 2
+            + 48
+        let strip = NSRect(x: 0, y: bounds.height - stripHeight, width: stripWidth, height: stripHeight)
         if strip.contains(local) {
             return nil
         }

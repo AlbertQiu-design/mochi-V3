@@ -12,6 +12,9 @@ final class AppSession {
     private var slots: DialogueSlotStore
     private var tracker = TaskTransitionTracker()
     private var seenStatus: [String: String] = [:]
+    private var hintCache: [CursorTask] = []
+    private var hintScannedAt: Double = 0
+    private var hintScanRunning = false
 
     init() {
         petStore = PetStore.live()
@@ -21,16 +24,13 @@ final class AppSession {
         prefs = prefsStore.load(migrating: Self.legacyFiles("island_offset.json"))
         let now = Date().timeIntervalSince1970
         HookEvents.scrubStored(tasksURL: AppConfig.cursorDirectory.appendingPathComponent("mochi-island-tasks.json"))
-        var active = Set(
+        let active = Set(
             TaskReader.load(
                 tasksURL: AppConfig.cursorDirectory.appendingPathComponent("mochi-island-tasks.json"),
                 now: now,
                 includePrompts: false
             ).map(\.id)
         )
-        if prefs.scanTranscripts {
-            active.formUnion(TaskReader.transcriptHints(now: now).map(\.id))
-        }
         slots = slotDisk.load(activeTaskIDs: active)
         repairInstalledHooks()
     }
@@ -54,6 +54,11 @@ final class AppSession {
     }
 
     func statePayload() -> [String: Any] {
+        liveSnapshot().state
+    }
+
+    /// One read of the tasks file for the capsule and the card. Transcript hints stay cached.
+    func liveSnapshot() -> (state: [String: Any], tasks: [[String: Any]]) {
         let now = Date().timeIntervalSince1970
         let before = pet
         PetEngine.tick(&pet, now: now)
@@ -69,7 +74,7 @@ final class AppSession {
         payload["slots"] = slots.slots.map(\.dictionary)
         payload["selected"] = slots.selected
         payload["dock"] = prefs.dock
-        return payload
+        return (payload, tasks.map(\.dictionary))
     }
 
     func play() -> [String: Any] {
@@ -255,6 +260,46 @@ final class AppSession {
     func setScanTranscripts(_ enabled: Bool) {
         prefs.scanTranscripts = enabled
         prefsStore.save(prefs)
+        if enabled {
+            hintScannedAt = 0
+        } else {
+            hintCache = []
+            hintScannedAt = 0
+        }
+    }
+
+    /// Walks transcripts off the hook path. The capsule reads the tasks file without waiting for this.
+    func refreshTranscriptHintsIfDue(now: Double = Date().timeIntervalSince1970, completion: @escaping (Bool) -> Void) {
+        guard TranscriptHints.due(lastScan: hintScannedAt, now: now, enabled: prefs.scanTranscripts) else {
+            completion(false)
+            return
+        }
+        guard !hintScanRunning else {
+            completion(false)
+            return
+        }
+        hintScanRunning = true
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let hints = TaskReader.transcriptHints(now: now)
+            DispatchQueue.main.async { [weak self] in
+                MainActor.assumeIsolated {
+                    self?.storeTranscriptHints(hints, completion: completion)
+                }
+            }
+        }
+    }
+
+    private func storeTranscriptHints(_ hints: [CursorTask], completion: (Bool) -> Void) {
+        defer { hintScanRunning = false }
+        guard prefs.scanTranscripts else {
+            hintCache = []
+            completion(true)
+            return
+        }
+        let changed = Set(hintCache.map(\.id)) != Set(hints.map(\.id))
+        hintCache = hints
+        hintScannedAt = Date().timeIntervalSince1970
+        completion(changed)
     }
 
     func markRead(_ id: String) {
@@ -303,13 +348,8 @@ final class AppSession {
     }
 
     private func visibleTasks(now: Double) -> [CursorTask] {
-        var tasks = TaskReader.load(tasksURL: tasksURL, now: now, includePrompts: true)
-        guard prefs.scanTranscripts else { return tasks }
-        let known = Set(tasks.map(\.id))
-        for hint in TaskReader.transcriptHints(now: now) where !known.contains(hint.id) {
-            tasks.append(hint)
-        }
-        return tasks.sorted { $0.id < $1.id }
+        let tasks = TaskReader.load(tasksURL: tasksURL, now: now, includePrompts: true)
+        return TranscriptHints.merge(tasks, hints: hintCache, enabled: prefs.scanTranscripts)
     }
 
     private func hookBinary() -> URL {

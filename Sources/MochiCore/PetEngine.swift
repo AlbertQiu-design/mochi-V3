@@ -186,6 +186,28 @@ public enum PetEngine {
         }
     }
 
+    /// Short line for the desktop kitten. Asleep is its own line; mood() still says sleepy.
+    public static func hoverLine(_ state: PetState, now: Double) -> String {
+        if state.lastAction == "feed", now - state.lastActionTs < PetRules.moodActionHold {
+            return "吃到啦。"
+        }
+        if state.asleep { return "在睡觉。" }
+        switch mood(state, now: now) {
+        case "playful":
+            return "想玩一会儿。"
+        case "sleepy":
+            return "有点困了。"
+        case "hungry":
+            return "肚子有点空。"
+        case "angry":
+            return "想自己待一会儿。"
+        case "asleep":
+            return "在睡觉。"
+        default:
+            return "心情正好。"
+        }
+    }
+
     public static func snapshot(_ state: PetState, now: Double) -> [String: Any] {
         [
             "name": state.name,
@@ -195,7 +217,8 @@ public enum PetEngine {
             "is_alive": true,
             "asleep": state.asleep,
             "mood": mood(state, now: now),
-            "message": message(state, now: now)
+            "message": message(state, now: now),
+            "hover": hoverLine(state, now: now)
         ]
     }
 

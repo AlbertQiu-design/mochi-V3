@@ -75,21 +75,32 @@ func clearStaleReply(itemID: String, requestID: String) {
     )
 }
 
+func matchedPermission(itemID: String, requestID: String) -> String? {
+    let data = readReply()
+    let action = (data["action"] as? String ?? "").lowercased()
+    guard action == "allow" || action == "deny" else { return nil }
+    let rid = data["request_id"] as? String ?? ""
+    let tid = data["id"] as? String ?? ""
+    if !requestID.isEmpty, rid == requestID { return action }
+    if requestID.isEmpty, tid == itemID { return action }
+    return nil
+}
+
 func waitPermission(itemID: String, requestID: String) -> String {
     clearStaleReply(itemID: itemID, requestID: requestID)
-    let deadline = Date().timeIntervalSince1970 + permissionTimeout
-    while Date().timeIntervalSince1970 < deadline {
-        let data = readReply()
-        let action = (data["action"] as? String ?? "").lowercased()
-        let rid = data["request_id"] as? String ?? ""
-        let tid = data["id"] as? String ?? ""
-        if !requestID.isEmpty, rid == requestID, action == "allow" || action == "deny" {
+    let deadline = Date().addingTimeInterval(permissionTimeout)
+    let wake = DispatchSemaphore(value: 0)
+    let watch = TaskFileWatch(fileURL: replyURL)
+    watch.start { wake.signal() }
+    defer { watch.stop() }
+    while Date() < deadline {
+        if let action = matchedPermission(itemID: itemID, requestID: requestID) {
             return action
         }
-        if requestID.isEmpty, tid == itemID, action == "allow" || action == "deny" {
-            return action
-        }
-        Thread.sleep(forTimeInterval: 0.2)
+        let remaining = deadline.timeIntervalSinceNow
+        if remaining <= 0 { break }
+        // The reply watch wakes this immediately. The short wait only covers a missed note.
+        _ = wake.wait(timeout: .now() + min(0.2, remaining))
     }
     // No user click: refuse the tool. Exit 0 still keeps Cursor unblocked.
     return "deny"

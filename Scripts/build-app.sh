@@ -47,4 +47,18 @@ cp "$ROOT/web/pets/"* "$APP/Contents/Resources/Web/pets/"
 cp "$ROOT/web/status/"*.gif "$APP/Contents/Resources/Web/status/"
 chmod +x "$APP/Contents/MacOS/MochiIsland" "$APP/Contents/MacOS/MochiHookCLI"
 codesign --force --deep --sign - "$APP" >/dev/null
+version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
+build="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Contents/Info.plist")"
 echo "Built $APP"
+echo "Version $version ($build)"
+# Same bundle id would bring an older MochiIsland forward. Quit every copy, then open this path.
+if pids="$(pgrep -x MochiIsland)"; then
+  # shellcheck disable=SC2086
+  kill $pids >/dev/null 2>&1 || true
+  for _ in {1..50}; do
+    pgrep -x MochiIsland >/dev/null || break
+    sleep 0.1
+  done
+fi
+open "$APP"
+echo "Opened $APP"

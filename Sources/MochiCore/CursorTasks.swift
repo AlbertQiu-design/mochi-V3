@@ -14,6 +14,8 @@ public struct CursorTask: Equatable {
     public var requestID: String
     public var source: String
     public var updated: Double
+    /// How many prompt submits this conversation has recorded. Allow does not increment it.
+    public var submitGen: Int
 
     public init(
         id: String,
@@ -28,7 +30,8 @@ public struct CursorTask: Equatable {
         questionID: String = "",
         requestID: String = "",
         source: String = "cursor",
-        updated: Double = 0
+        updated: Double = 0,
+        submitGen: Int = 0
     ) {
         self.id = id
         self.title = title
@@ -43,6 +46,7 @@ public struct CursorTask: Equatable {
         self.requestID = requestID
         self.source = AgentLaunch.normalize(source)
         self.updated = updated
+        self.submitGen = max(0, submitGen)
     }
 
     public var dictionary: [String: Any] {
@@ -59,7 +63,8 @@ public struct CursorTask: Equatable {
             "allow_multiple": allowMultiple,
             "question_id": questionID,
             "request_id": requestID,
-            "updated": updated
+            "updated": updated,
+            "submit_gen": submitGen
         ]
     }
 }
@@ -174,7 +179,8 @@ public enum TaskReader {
                 questionID: item["question_id"] as? String ?? "",
                 requestID: item["request_id"] as? String ?? "",
                 source: AgentLaunch.normalize(item["source"] as? String),
-                updated: updated
+                updated: updated,
+                submitGen: (item["submit_gen"] as? NSNumber)?.intValue ?? 0
             ))
         }
         return visible.sorted { $0.id < $1.id }
@@ -200,6 +206,27 @@ public enum TaskReader {
             hints.append(CursorTask(id: id, title: "Cursor task", status: "running", updated: modified))
         }
         return hints
+    }
+}
+
+/// Transcript hints are optional and slow. The hook path reads the tasks file only.
+public enum TranscriptHints {
+    public static let refreshInterval: Double = 5
+
+    public static func due(lastScan: Double, now: Double, enabled: Bool) -> Bool {
+        guard enabled else { return false }
+        if lastScan <= 0 { return true }
+        return now - lastScan >= refreshInterval
+    }
+
+    public static func merge(_ tasks: [CursorTask], hints: [CursorTask], enabled: Bool) -> [CursorTask] {
+        guard enabled, !hints.isEmpty else { return tasks }
+        let known = Set(tasks.map(\.id))
+        var combined = tasks
+        for hint in hints where !known.contains(hint.id) {
+            combined.append(hint)
+        }
+        return combined.sorted { $0.id < $1.id }
     }
 }
 

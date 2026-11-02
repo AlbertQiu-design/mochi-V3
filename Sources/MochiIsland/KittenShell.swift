@@ -212,23 +212,30 @@ struct KittenRoot: View {
 
     private func agentRow(_ row: KittenRow) -> some View {
         let selected = model.selected == row.id
+        let s = model.petScale
+        let icon = AppConfig.agentIcon * s
+        let dot = AppConfig.unreadDot * s
+        // Same corner as the old top-trailing dot: half the icon, out by 3, back by half the dot.
+        let dotShift = icon / 2 + 3 * s - dot / 2
         return ZStack {
             if selected {
                 selectionPlate
             }
-            ZStack(alignment: .topTrailing) {
-                rowIcon(row)
-                    .frame(width: AppConfig.agentIcon * model.petScale, height: AppConfig.agentIcon * model.petScale)
-                if row.showsDot {
-                    Circle()
-                        .fill(Color(red: 1, green: 59 / 255, blue: 48 / 255))
-                        .frame(width: AppConfig.unreadDot * model.petScale, height: AppConfig.unreadDot * model.petScale)
-                        .offset(x: 3 * model.petScale, y: -3 * model.petScale)
-                }
+            rowIcon(row)
+                .frame(width: icon, height: icon)
+            AgentStatusRing(status: row.status)
+                .frame(width: AppConfig.agentRow * s, height: AppConfig.agentRow * s)
+                .allowsHitTesting(false)
+            if row.showsDot {
+                Circle()
+                    .fill(Color(red: 1, green: 59 / 255, blue: 48 / 255))
+                    .frame(width: dot, height: dot)
+                    .offset(x: dotShift, y: -dotShift)
             }
         }
-        .frame(width: (AppConfig.agentIcon + 8) * model.petScale, height: AppConfig.agentRow * model.petScale)
+        .frame(width: AppConfig.agentRow * s, height: AppConfig.agentRow * s)
         .accessibilityLabel(row.title)
+        .accessibilityValue(AgentStatusRing.voice(for: row.status))
     }
 
     /// Glass only while the highlight is traveling. At rest it is a flat fill, not a second glass layer.
@@ -295,6 +302,10 @@ final class KittenShell: NSObject {
     private var dragFrame = NSRect.zero
     private var remembered: [String: String] = [:]
     private var timbre = "boop"
+    private var cueSubmit = IslandPrefs.submitSounds[0]
+    private var cueDone = IslandPrefs.doneSounds[0]
+    private var cueStuck = IslandPrefs.stuckSounds[0]
+    private var cueTracker = TaskCueTracker()
     private var dock = "right"
     private var monitors: [Any] = []
     private weak var host: NSWindow?
@@ -305,6 +316,9 @@ final class KittenShell: NSObject {
     private var springTail: CGFloat = 0
     private var selectionTicket = 0
     private var pinnedIDs: Set<String> = []
+    /// Done and fail ids the user has already opened and closed.
+    /// A later refresh must not put that icon back by treating the task as unread.
+    private var readFinished: Set<String> = []
     private var trackingPointer = false
     private var scale: CGFloat = 1
     private var renderedScale: CGFloat = 1
@@ -316,6 +330,8 @@ final class KittenShell: NSObject {
     private var heightVelocity: CGFloat = 0
     private var widthVelocity: CGFloat = 0
     private var rowSignature = ""
+    private let hoverTip = PetHoverTip()
+    private var hoverLine = "心情正好。"
 
     private var kittenSide: CGFloat { AppConfig.kittenSize * renderedScale }
 
@@ -408,11 +424,13 @@ final class KittenShell: NSObject {
         if let current = self.host {
             current.removeChildWindow(panel)
             current.removeChildWindow(bubble.panel)
+            current.removeChildWindow(hoverTip.panel)
         }
         self.host = host
         panel.collectionBehavior = host.collectionBehavior
         host.addChildWindow(panel, ordered: .above)
         bubble.attach(to: host)
+        hoverTip.attach(to: host)
         panel.orderFrontRegardless()
         ensurePosition()
         layout()
@@ -420,6 +438,9 @@ final class KittenShell: NSObject {
 
     func apply(prefs: IslandPrefs, force: Bool = false) {
         timbre = IslandPrefs.soundIDs.contains(prefs.sound) ? prefs.sound : "boop"
+        cueSubmit = IslandPrefs.submitSounds.contains(prefs.soundSubmit) ? prefs.soundSubmit : IslandPrefs.submitSounds[0]
+        cueDone = IslandPrefs.doneSounds.contains(prefs.soundDone) ? prefs.soundDone : IslandPrefs.doneSounds[0]
+        cueStuck = IslandPrefs.stuckSounds.contains(prefs.soundStuck) ? prefs.soundStuck : IslandPrefs.stuckSounds[0]
         dock = prefs.dock == "left" ? "left" : "right"
         let nextLook = IslandPrefs.normalizeLook(prefs.look)
         if model.look != nextLook {
@@ -456,6 +477,7 @@ final class KittenShell: NSObject {
 
     func sync(slots: [[String: Any]], selected _: String, tasks: [[String: Any]], dock: String) {
         self.dock = dock == "left" ? "left" : "right"
+        noteTaskCues(tasks)
         rememberTasks(tasks)
         var taskByID: [String: [String: Any]] = [:]
         for task in tasks {
@@ -468,6 +490,11 @@ final class KittenShell: NSObject {
         }
         let previousSource = model.rows.first { $0.id == model.selected }?.source
         let previousIDs = Set(model.rows.map(\.id))
+        var slotRead: [String: Bool] = [:]
+        for raw in slots {
+            let id = string(raw["id"])
+            if !id.isEmpty { slotRead[id] = bool(raw["read"]) }
+        }
         var candidates: [AgentIconCandidate] = slots.compactMap { raw in
             let id = string(raw["id"])
             guard !id.isEmpty else { return nil }
@@ -490,14 +517,15 @@ final class KittenShell: NSObject {
             let title = string(raw["title"])
             let updated = number(task?["updated"])
             let created = number(raw["created"])
+            let pending = pendingOptions(in: task)
             return AgentIconCandidate(
                 id: id,
                 source: source,
                 title: title.isEmpty ? SlotFace.displayName(for: source) : title,
                 status: status,
-                read: bool(raw["read"]),
+                read: reconciledRead(id: id, status: status, slotRead: bool(raw["read"]), pending: pending),
                 updated: updated > 0 ? updated : created,
-                hasPendingOptions: pendingOptions(in: task)
+                hasPendingOptions: pending
             )
         }
         var seenIDs = Set(candidates.map(\.id))
@@ -508,8 +536,9 @@ final class KittenShell: NSObject {
             guard status == "running" || status == "wait" || status == "done" || status == "fail" else { continue }
             let source = AgentLaunch.normalize(string(task["source"]))
             if source == "mochi" { continue }
-            seenIDs.insert(id)
-            candidates.append(AgentIconCandidate(
+            let pending = pendingOptions(in: task)
+            let read = reconciledRead(id: id, status: status, slotRead: slotRead[id] == true, pending: pending)
+            let candidate = AgentIconCandidate(
                 id: id,
                 source: source,
                 title: {
@@ -517,12 +546,17 @@ final class KittenShell: NSObject {
                     return title.isEmpty ? SlotFace.displayName(for: source) : title
                 }(),
                 status: status,
-                read: false,
+                read: read,
                 updated: number(task["updated"]),
-                hasPendingOptions: pendingOptions(in: task)
-            ))
+                hasPendingOptions: pending
+            )
+            // A finished task the user already read is not a slot row. Do not put it back as unread.
+            // Pins keep that icon while its card is still open.
+            guard AgentIconList.shouldShow(candidate, holding: pinnedIDs, now: Date().timeIntervalSince1970) else { continue }
+            seenIDs.insert(id)
+            candidates.append(candidate)
         }
-        let nextRows = AgentIconList.rows(candidates, holding: pinnedIDs).map { row in
+        let nextRows = AgentIconList.rows(candidates, holding: pinnedIDs, now: Date().timeIntervalSince1970).map { row in
             KittenRow(
                 id: row.id,
                 source: row.source,
@@ -564,9 +598,43 @@ final class KittenShell: NSObject {
         layout()
     }
 
-    func noteHover(at screenPoint: NSPoint) {}
+    func setHoverLine(_ line: String) {
+        let next = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !next.isEmpty, next != hoverLine else { return }
+        hoverLine = next
+        guard hoverTip.visible else { return }
+        noteHover(at: NSEvent.mouseLocation)
+    }
 
-    func hideTip() {}
+    /// Shows the state line only while the pointer is on the collapsed kitten or the open kitten icon.
+    func noteHover(at screenPoint: NSPoint) {
+        guard !dragging, kittenBand().contains(screenPoint) else {
+            hideTip()
+            return
+        }
+        hoverTip.show(
+            line: hoverLine,
+            capsule: panel.frame,
+            kittenMidY: kittenBand().midY,
+            screen: canvas().visible,
+            avoiding: interactiveBubbleFrame
+        )
+    }
+
+    func hideTip() {
+        hoverTip.hide()
+    }
+
+    /// The pet row, including its padding. Agent icons, plus, and gear sit outside this band.
+    private func kittenBand() -> NSRect {
+        let frame = panel.frame
+        guard frame.height > kittenSide + 1 else { return frame }
+        let band = (AppConfig.capsulePadY + AppConfig.agentRow) * renderedScale
+        if model.opensUp {
+            return NSRect(x: frame.minX, y: frame.minY, width: frame.width, height: band)
+        }
+        return NSRect(x: frame.minX, y: frame.maxY - band, width: frame.width, height: band)
+    }
 
     func hideCard() {
         closeBubble(retire: false)
@@ -582,9 +650,31 @@ final class KittenShell: NSObject {
     func presentAlert(id: String) {
         guard let index = model.rows.firstIndex(where: { $0.id == id || $0.memberIDs.contains(id) }) else { return }
         showCard(index: index, kind: .alert, sound: false, taskID: id)
-        let status = string(taskCache[id]?["status"])
-        let event: SoundPlayer.Event = status == "done" ? .done : .alert
-        SoundPlayer.shared.play(event, timbre: timbre)
+    }
+
+    /// Plays a cue when a prompt is submitted, a task finishes, or it starts waiting or fails.
+    /// The first snapshot is silent, and the same status does not play again on the next poll.
+    private func noteTaskCues(_ tasks: [[String: Any]]) {
+        let events: [TaskCueEvent] = tasks.compactMap { task in
+            let id = string(task["id"])
+            let status = string(task["status"])
+            guard !id.isEmpty, !status.isEmpty else { return nil }
+            return TaskCueEvent(
+                id: id,
+                status: status,
+                submitGen: whole(task["submit_gen"]),
+                updated: number(task["updated"])
+            )
+        }
+        for cue in cueTracker.observe(events) {
+            let name: String
+            switch cue {
+            case .submit: name = cueSubmit
+            case .complete: name = cueDone
+            case .stuck: name = cueStuck
+            }
+            SoundPlayer.shared.playCue(name)
+        }
     }
 
     func chromePayload(in host: NSWindow) -> [String: Any] {
@@ -643,6 +733,7 @@ final class KittenShell: NSObject {
             guard let self else { return }
             if hypot(delta.width, delta.height) < AppConfig.dragThreshold { return }
             self.dragging = true
+            self.hideTip()
             var frame = self.dragFrame
             frame.origin.x += delta.width
             frame.origin.y += delta.height
@@ -845,6 +936,12 @@ final class KittenShell: NSObject {
         if kind == .card {
             pinnedIDs = Set(row.memberIDs)
             for id in row.memberIDs {
+                let cached = string(taskCache[id]?["status"])
+                let live = cached.isEmpty ? row.status : cached
+                // A finished card is read once it is open. Waiting stays in the capsule until the user answers.
+                if (live == "done" || live == "fail") && !pendingOptions(in: taskCache[id]) {
+                    readFinished.insert(id)
+                }
                 onRead?(id)
             }
             if let fresh = model.rows.firstIndex(where: { $0.id == row.id }) {
@@ -882,12 +979,14 @@ final class KittenShell: NSObject {
         bubble.model.status = statusLine(liveStatus)
         let cachedSummary = string(taskCache[focusID]?["summary"])
         let blurbSource = cachedSummary.isEmpty ? task.summary : cachedSummary
+        let rawTitle = string(taskCache[focusID]?["title"])
         bubble.model.summary = PermissionCopy.cardBlurb(
             summary: blurbSource,
             detail: rawDetail,
             kind: task.kind,
             status: liveStatus,
-            optionIDs: optionIDs
+            optionIDs: optionIDs,
+            title: rawTitle.isEmpty ? subject : rawTitle
         )
         bubble.model.options = task.options
         bubble.model.taskID = focusID
@@ -934,7 +1033,7 @@ final class KittenShell: NSObject {
             let face = model.rows.first { $0.id == openID || $0.memberIDs.contains(openID) }
             let isFace = face?.id == openID
             if !AgentIconList.permissionStaysOpen(taskStatus: live, isFace: isFace) {
-                closeBubble(retire: false)
+                closeBubble(retire: false, markFinished: false)
                 return
             }
             let detail = string(taskCache[openID]?["detail"])
@@ -954,23 +1053,87 @@ final class KittenShell: NSObject {
                 detail: detail,
                 kind: bubble.model.taskKind,
                 status: live,
-                optionIDs: optionIDs
+                optionIDs: optionIDs,
+                title: title
             )
             if !live.isEmpty {
                 bubble.model.status = statusLine(live)
             }
+        } else if bubble.model.kind == .card || bubble.model.kind == .alert {
+            let live = string(taskCache[openID]?["status"])
+            let detail = string(taskCache[openID]?["detail"])
+            let blurb = string(taskCache[openID]?["summary"])
+            let kind = string(taskCache[openID]?["kind"])
+            let title = string(taskCache[openID]?["title"])
+            bubble.model.summary = PermissionCopy.cardBlurb(
+                summary: blurb,
+                detail: detail,
+                kind: kind.isEmpty ? bubble.model.taskKind : kind,
+                status: live,
+                optionIDs: optionIDs,
+                title: title
+            )
+            if !live.isEmpty {
+                bubble.model.status = statusLine(live)
+            }
+            let updated = number(taskCache[openID]?["updated"])
+            if updated > 0 { bubble.model.updated = updated }
         }
         repositionBubble()
     }
 
-    private func closeBubble(retire: Bool) {
+    private func closeBubble(retire: Bool, markFinished: Bool = true) {
         let was = bubble.visible
+        let kind = bubble.model.kind
+        let openID = bubble.model.taskID
+        var members = model.rows.first(where: { $0.id == model.selected || $0.memberIDs.contains(openID) })?.memberIDs ?? []
+        if !openID.isEmpty, !members.contains(openID) {
+            members.append(openID)
+        }
         bubble.hide()
         model.selected = ""
         model.selectionMoving = false
         selectionTicket += 1
         pinnedIDs = []
-        if was && retire { onRetire?() }
+        let track = was && markFinished && (kind == .card || kind == .alert)
+        if track {
+            rememberFinishedReads(members)
+        }
+        if was && retire {
+            onRetire?()
+        }
+        // The refresh above can clear read when a chat just finished. Mark it again and redraw.
+        if track, rememberFinishedReads(members) {
+            onRetire?()
+        }
+    }
+
+    /// Running and waiting icons stay. A finished chat the user already closed stays read
+    /// even when a refresh rebuilds that task as unread.
+    private func reconciledRead(id: String, status: String, slotRead: Bool, pending: Bool) -> Bool {
+        if status == "running" || status == "wait" {
+            readFinished.remove(id)
+            return slotRead
+        }
+        if pending { return slotRead }
+        if (status == "done" || status == "fail") && readFinished.contains(id) {
+            return true
+        }
+        return slotRead
+    }
+
+    /// Records done and fail only. A waiting card still has a choice, so closing it does not retire the icon.
+    private func rememberFinishedReads(_ ids: [String]) -> Bool {
+        var marked = false
+        for id in ids where !id.isEmpty {
+            let status = string(taskCache[id]?["status"])
+            guard status == "done" || status == "fail" else { continue }
+            guard !pendingOptions(in: taskCache[id]) else { continue }
+            readFinished.insert(id)
+            onRead?(id)
+            marked = true
+        }
+        return marked
     }
 
     private func repositionBubble() {
@@ -1061,6 +1224,9 @@ final class KittenShell: NSObject {
         panel.setFrame(frame, display: true)
         mouse.frame = NSRect(origin: .zero, size: frame.size)
         hosting.frame = mouse.bounds
+        if hoverTip.visible {
+            noteHover(at: NSEvent.mouseLocation)
+        }
     }
 
     private func startSpring() {
@@ -1349,7 +1515,14 @@ final class KittenShell: NSObject {
 
     private func number(_ value: Any?) -> Double {
         if let value = value as? Double { return value }
+        if let value = value as? Int { return Double(value) }
         if let value = value as? NSNumber { return value.doubleValue }
+        return 0
+    }
+
+    private func whole(_ value: Any?) -> Int {
+        if let value = value as? Int { return value }
+        if let value = value as? NSNumber { return value.intValue }
         return 0
     }
 
@@ -1373,5 +1546,133 @@ final class HitHostingView<Content: View>: NSHostingView<Content> {
     override func hitTest(_ point: NSPoint) -> NSView? {
         if let view = super.hitTest(point) { return view }
         return bounds.contains(point) ? self : nil
+    }
+}
+
+/// One small label beside the kitten. It is not the task bubble, and it never sits on the agent icons.
+@MainActor
+final class PetHoverTip {
+    let panel: CapsulePanel
+    private let label: NSTextField
+    private weak var host: NSWindow?
+    private(set) var visible = false
+
+    init() {
+        let panel = CapsulePanel(
+            contentRect: NSRect(x: 0, y: 0, width: 96, height: 28),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.hidesOnDeactivate = false
+        panel.isFloatingPanel = true
+        panel.isMovable = false
+        panel.ignoresMouseEvents = true
+        panel.becomesKeyOnlyIfNeeded = true
+        panel.isRestorable = false
+        panel.animationBehavior = .none
+        panel.title = "Mochi"
+        panel.level = .floating
+        panel.alphaValue = 0
+        let effect = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: 96, height: 28))
+        effect.material = .popover
+        effect.blendingMode = .behindWindow
+        effect.state = .active
+        effect.wantsLayer = true
+        effect.layer?.cornerRadius = 9
+        effect.layer?.masksToBounds = true
+        effect.autoresizingMask = [.width, .height]
+        let label = NSTextField(labelWithString: "")
+        label.font = NSFont(name: "PingFangSC-Regular", size: 13) ?? .systemFont(ofSize: 13)
+        label.textColor = .labelColor
+        label.alignment = .center
+        label.lineBreakMode = .byClipping
+        label.maximumNumberOfLines = 1
+        label.drawsBackground = false
+        label.isBezeled = false
+        label.isEditable = false
+        label.isSelectable = false
+        effect.addSubview(label)
+        panel.contentView = effect
+        self.panel = panel
+        self.label = label
+    }
+
+    func attach(to host: NSWindow) {
+        self.host = host
+        panel.level = NSWindow.Level(rawValue: host.level.rawValue + 4)
+        panel.collectionBehavior = host.collectionBehavior
+        if host.childWindows?.contains(panel) != true {
+            host.addChildWindow(panel, ordered: .above)
+        }
+        hide()
+    }
+
+    func hide() {
+        guard visible else { return }
+        visible = false
+        panel.alphaValue = 0
+        panel.orderOut(nil)
+    }
+
+    func show(line: String, capsule: NSRect, kittenMidY: CGFloat, screen: CGRect, avoiding bubble: NSRect?) {
+        let font = label.font ?? NSFont.systemFont(ofSize: 13)
+        let measured = (line as NSString).size(withAttributes: [.font: font])
+        let size = NSSize(width: ceil(measured.width) + 18, height: max(26, ceil(measured.height) + 10))
+        let frame = placed(size: size, capsule: capsule, kittenMidY: kittenMidY, screen: screen, avoiding: bubble)
+        label.stringValue = line
+        if let host, host.childWindows?.contains(panel) != true {
+            host.addChildWindow(panel, ordered: .above)
+        }
+        let becoming = !visible
+        visible = true
+        panel.setFrame(frame, display: true)
+        label.frame = NSRect(x: 8, y: 4, width: max(1, frame.width - 16), height: max(1, frame.height - 8))
+        panel.alphaValue = 1
+        if becoming {
+            panel.orderFrontRegardless()
+        }
+    }
+
+    private func placed(size: NSSize, capsule: NSRect, kittenMidY: CGFloat, screen: CGRect, avoiding bubble: NSRect?) -> NSRect {
+        let gap: CGFloat = 8
+        let placeLeft = capsule.midX >= screen.midX
+        var frame = NSRect(
+            x: placeLeft ? capsule.minX - gap - size.width : capsule.maxX + gap,
+            y: kittenMidY - size.height / 2,
+            width: size.width,
+            height: size.height
+        )
+        if placeLeft, frame.minX < screen.minX + 4 {
+            frame.origin.x = capsule.maxX + gap
+        } else if !placeLeft, frame.maxX > screen.maxX - 4 {
+            frame.origin.x = capsule.minX - gap - size.width
+        }
+        if frame.intersects(capsule) {
+            let above = kittenMidY >= capsule.midY
+            frame.origin.y = above ? capsule.maxY + gap : capsule.minY - gap - size.height
+            let minX = screen.minX + 4
+            let maxX = max(minX, screen.maxX - size.width - 4)
+            frame.origin.x = min(max(capsule.midX - size.width / 2, minX), maxX)
+        }
+        let minY = screen.minY + 4
+        let maxY = max(minY, screen.maxY - size.height - 4)
+        frame.origin.y = min(max(frame.origin.y, minY), maxY)
+        let minX = screen.minX + 4
+        let maxX = max(minX, screen.maxX - size.width - 4)
+        frame.origin.x = min(max(frame.origin.x, minX), maxX)
+        if let bubble, frame.intersects(bubble) {
+            frame.origin.y = kittenMidY >= bubble.midY
+                ? min(bubble.maxY + 6, maxY)
+                : max(minY, bubble.minY - size.height - 6)
+        }
+        if frame.intersects(capsule) {
+            frame.origin.x = placeLeft ? capsule.minX - gap - size.width : capsule.maxX + gap
+            frame.origin.y = min(max(kittenMidY - size.height / 2, minY), maxY)
+        }
+        return frame
     }
 }

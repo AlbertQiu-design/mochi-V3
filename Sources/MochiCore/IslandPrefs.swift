@@ -11,6 +11,12 @@ public struct IslandPrefs: Codable, Equatable {
     public var cardFill: String
     public var cardStroke: String
     public var sound: String
+    /// Cue played when a task is submitted.
+    public var soundSubmit: String
+    /// Cue played when a task finishes.
+    public var soundDone: String
+    /// Cue played when a task is waiting or fails.
+    public var soundStuck: String
     public var look: String
     public var petScale: Double
     public var bubbleScale: Double
@@ -28,6 +34,12 @@ public struct IslandPrefs: Codable, Equatable {
     public var pickerGPT: Bool
 
     public static let soundIDs = ["boop", "chirp", "mew", "pop", "twinkle"]
+    /// Apple-like cues for a submitted task. Glass is the default.
+    public static let submitSounds = ["glass", "ripple", "ping"]
+    /// Apple-like cues for a finished task. Chime is the default.
+    public static let doneSounds = ["chime", "bloom", "spark"]
+    /// Apple-like cues for a waiting or failed task. Drop is the default.
+    public static let stuckSounds = ["drop", "thud", "hush"]
     public static let docks = ["left", "right"]
     public static let pickerOrder = ["cursor", "codex", "claude", "gemini", "grok-bot", "gpt"]
     /// Placeholder pet looks shown as A…F in Settings → Pet until real art ships.
@@ -67,6 +79,9 @@ public struct IslandPrefs: Codable, Equatable {
         cardFill: String = "#fffdf8",
         cardStroke: String = "#2c2926",
         sound: String = "boop",
+        soundSubmit: String = "glass",
+        soundDone: String = "chime",
+        soundStuck: String = "drop",
         look: String = "a",
         petScale: Double = 1,
         bubbleScale: Double = 1,
@@ -92,7 +107,10 @@ public struct IslandPrefs: Codable, Equatable {
         self.stroke = stroke
         self.cardFill = cardFill
         self.cardStroke = cardStroke
-        self.sound = sound
+        self.sound = Self.soundIDs.contains(sound) ? sound : "boop"
+        self.soundSubmit = Self.choice(soundSubmit, allowed: Self.submitSounds, fallback: "glass")
+        self.soundDone = Self.choice(soundDone, allowed: Self.doneSounds, fallback: "chime")
+        self.soundStuck = Self.choice(soundStuck, allowed: Self.stuckSounds, fallback: "drop")
         self.look = Self.normalizeLook(look)
         self.petScale = petScale
         self.bubbleScale = bubbleScale
@@ -125,6 +143,9 @@ public struct IslandPrefs: Codable, Equatable {
             "card_fill": cardFill,
             "card_stroke": cardStroke,
             "sound": sound,
+            "sound_submit": soundSubmit,
+            "sound_done": soundDone,
+            "sound_stuck": soundStuck,
             "look": look,
             "pet_scale": petScale,
             "bubble_scale": bubbleScale,
@@ -144,6 +165,9 @@ public struct IslandPrefs: Codable, Equatable {
     enum CodingKeys: String, CodingKey {
         case dx, dy, bubbleDx, bubbleDy, fill, text, stroke, cardFill, cardStroke
         case sound, look, petScale, bubbleScale, cursorPrivacyAccepted, scanTranscripts, dock
+        case soundSubmit = "sound_submit"
+        case soundDone = "sound_done"
+        case soundStuck = "sound_stuck"
         case kittenX = "kitten_x"
         case kittenY = "kitten_y"
         case kittenPlaced = "kitten_placed"
@@ -168,6 +192,9 @@ public struct IslandPrefs: Codable, Equatable {
             cardFill: try container.decodeIfPresent(String.self, forKey: .cardFill) ?? "#fffdf8",
             cardStroke: try container.decodeIfPresent(String.self, forKey: .cardStroke) ?? "#2c2926",
             sound: try container.decodeIfPresent(String.self, forKey: .sound) ?? "boop",
+            soundSubmit: try container.decodeIfPresent(String.self, forKey: .soundSubmit) ?? "glass",
+            soundDone: try container.decodeIfPresent(String.self, forKey: .soundDone) ?? "chime",
+            soundStuck: try container.decodeIfPresent(String.self, forKey: .soundStuck) ?? "drop",
             look: try container.decodeIfPresent(String.self, forKey: .look) ?? "a",
             petScale: try container.decodeIfPresent(Double.self, forKey: .petScale) ?? 1,
             bubbleScale: try container.decodeIfPresent(Double.self, forKey: .bubbleScale) ?? 1,
@@ -199,6 +226,9 @@ public struct IslandPrefs: Codable, Equatable {
         try container.encode(cardFill, forKey: .cardFill)
         try container.encode(cardStroke, forKey: .cardStroke)
         try container.encode(sound, forKey: .sound)
+        try container.encode(soundSubmit, forKey: .soundSubmit)
+        try container.encode(soundDone, forKey: .soundDone)
+        try container.encode(soundStuck, forKey: .soundStuck)
         try container.encode(look, forKey: .look)
         try container.encode(petScale, forKey: .petScale)
         try container.encode(bubbleScale, forKey: .bubbleScale)
@@ -229,6 +259,15 @@ public struct IslandPrefs: Codable, Equatable {
         next.cardStroke = hex(json["card_stroke"]) ?? base.cardStroke
         if let sound = json["sound"] as? String, soundIDs.contains(sound) {
             next.sound = sound
+        }
+        if let sound = json["sound_submit"] as? String, submitSounds.contains(sound) {
+            next.soundSubmit = sound
+        }
+        if let sound = json["sound_done"] as? String, doneSounds.contains(sound) {
+            next.soundDone = sound
+        }
+        if let sound = json["sound_stuck"] as? String, stuckSounds.contains(sound) {
+            next.soundStuck = sound
         }
         if let look = json["look"] as? String,
            look.range(of: "^[a-z0-9_-]{1,32}$", options: .regularExpression) != nil {
@@ -266,6 +305,10 @@ public struct IslandPrefs: Codable, Equatable {
         if let value = json["picker_grok"] { next.pickerGrok = flag(value, fallback: base.pickerGrok) }
         if let value = json["picker_gpt"] { next.pickerGPT = flag(value, fallback: base.pickerGPT) }
         return next
+    }
+
+    private static func choice(_ raw: String, allowed: [String], fallback: String) -> String {
+        allowed.contains(raw) ? raw : fallback
     }
 
     private static func unit(_ value: Double) -> Double {

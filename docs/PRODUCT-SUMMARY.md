@@ -1,174 +1,98 @@
-# Mochi Island 产品功能总结
+# Mochi Island
 
-> 面向团队说明：当前能力、连接方式、交互规则，以及后续扩展方向。  
-> 可直接转发；若需要演示视频，可按文末「建议演示脚本」录屏。
+对应本机正在开发的版本：#**1.0（build 3）**，只跑 **macOS 26/27**。应用是原生 Swift，没有本地网页服务。
 
-**产品一句话：** Mochi 是一只浮在 macOS 桌面上的小猫桌宠。它通过本机 Hooks 连接 Cursor、Codex 等 AI 工具，在胶囊侧栏里静默显示对话状态，需要时再弹出卡片做 Allow / Deny 或查看摘要。
+**github：[https://github.com/AlbertQiu-design/mochi-V3/tree/main](https://github.com/AlbertQiu-design/mochi-V3/tree/main)**
 
----
+**简要介绍：** Mochi 是一只浮在 Mac 桌面上的小猫。它用本机 Hooks 连接 Cursor、Codex 等工具，在胶囊里看每个对话的状态，需要时在旁边处理 Allow / Deny。
 
-## 1. 产品定位
-
-| 维度 | 说明 |
-|------|------|
-| 形态 | 原生 macOS App（Swift + 薄 Web 桥），无本地 localhost 服务 |
-| 视觉 | 无框小猫 → 点击弹出 Liquid Glass 胶囊 → 旁侧玻璃气泡卡片 |
-| 价值 | 不打断工作流：任务在侧栏可见；权限在胶囊旁一键处理；不抄写完整提示词/命令 |
-| 分发 | 内测可用本机构建的 `.app`；正式给用户需 Developer ID 签名 + 公证 DMG |
+内测用本机构建的 `island/MochiIsland.app`。发给外部用户还需要 Developer ID 签名和公证 DMG，这一步还没做。
 
 ---
 
-## 2. 当前支持的功能一览
+## 产品描述
 
-### 2.1 桌面小猫与胶囊
+收起时只有一只无框小猫。拖动超过大约 3pt 会记住位置。点一下，向下弹出 Liquid Glass 胶囊；靠近屏幕底部、空间不够时改为向上长。
 
-- **拖动放置**：拖超过约 3pt 保存屏幕相对位置；收起时只有小猫，无常亮底盘。
-- **点击展开胶囊**：弹簧动画；平时向下生长；靠近屏幕底部且空间不够时**向上生长**，小猫留在胶囊最下。
-- **胶囊内容顺序**：小猫图标 → 各 Agent 对话图标 → 加号 → 齿轮。
-- **选中态**：移动中为液态玻璃圆底，停下后为稍深平色。
-- **尺寸**：设置里 Kitten 滑杆 0.5×～2×；拖动时小猫/胶囊即时缩放，**设置面板本身不跟着跳**（下次打开设置再更新位置）。
+胶囊里从左到右是：小猫、正在进行或还没看过的对话图标、加号、齿轮。选中高亮会弹过去，停住后变成稍深的平色。尺寸可以在 0.5× 到 2× 之间调，小猫和胶囊一起变。外观暂时是 A–F 六个字母，共用一张图，只换色，右下角标着当前字母。
 
-### 2.2 对话图标与显隐规则（侧栏）
+## 状态环 & icon
 
-- **一个对话一颗图标**（例如多个 Cursor 对话会有多颗 Cursor 图标）。
-- **进行中 / 等待中**：图标**必须**留在胶囊里，**默认不自动弹窗**（静默显示，红点可提示等待）。
-- **用户点击图标**：才展开详情卡片（含状态、时间、摘要等）。
-- **已完成**：未点开过的可提示；用户点开看过、且**没有**待处理选项（如 Allow/Deny）后，图标从胶囊移除。
-- **有待办选项**的项：即使已读，也先留在胶囊，直到用户处理完。
+每个对话图标旁边有状态环：
 
-### 2.3 详情 / 权限卡片
+| 状态 | 环 |
+|---|---|
+| 进行中 | 蓝色的点绕着图标转 |
+| 等待选择，或失败 | 红色的环，右下角留缺口，缺口里是叉 |
+| 完成、还没看过 | 绿色的环，右下角留缺口，缺口里是勾 |
 
-卡片上可展示（与产品说明一致）：
+一个对话一颗图标。进行中和还在等选择的会留在胶囊里，不自动弹出大卡片。完成后，用户点开看过、并且没有待选的 Allow / Deny，图标就离开。还在等选择的会留下。
 
-- 动作类型：Shell / MCP / Permission 等  
-- 来源（Cursor、Codex…）  
-- 相对时间（如 `1m`）  
-- 状态（Running / Waiting / Done…）  
-- 提交内容**缩略**（约 40 字；无摘要时权限卡有兜底文案，如 `Shell needs Allow`）  
-- Allow / Deny 等选项按钮  
+旁边只有一个玻璃气泡，用来看任务、处理权限，或从加号里挑一个软件。加号菜单只显示设置里打开的图标，没有名字。卡片上有来源、相对时间、状态，以及大约 40 字的提交摘要。完整提示词和命令不保存。点 Allow 或 Deny 只写本机回复；点卡片其它地方会把对应软件带到前面，没装就打开网页。超时默认拒绝，不会把 Agent 卡死。
 
-交互约定：
+## 声音
 
-- **Allow / Deny**：只负责答复权限，写入本机 reply 文件，卡片关闭。  
-- **点击卡片上非选项区域**（标题、状态、摘要、空白等）：跳回对应软件（如唤起 Cursor / Codex），作为「回到原对话」入口；选项按钮功能不变。  
-- 不自动 Allow Shell/MCP；超时默认 Deny（仍 fail-open，不卡死 Agent）。
+系统静音时不响。点小猫、选图标时用一套点击音：Boop、Chirp、Mew、Pop、Twinkle。
 
-### 2.4 设置面板
+任务还有三组提示音，每组三种，在设置里试听后选用：
 
-- 浅色圆角玻璃；**红黄绿三键在面板内部**（不挂在外面）。
-- 标签：General / Kitten / Sound / Agents（整颗可点）。
-- **General**：复位位置、登录打开、Version / Build。
-- **Kitten**：一只小猫 + 尺寸。
-- **Sound**：Boop / Chirp / Mew / Pop / Twinkle；系统静音时不响。
-- **Agents**：各软件连接状态 + **Connect / Disconnect 一键配置**（用户不手改 hook 文件）；Cursor 隐私确认；可选本机文件名/时间扫描（默认关，不记聊天正文）；加号菜单里各图标开关。
+| 时机 | 选项 | 默认 |
+|---|---|---|
+| 提交成功 | Glass、Ripple、Ping | Glass |
+| 任务完成 | Chime、Bloom、Spark | Chime |
+| 卡住或失败 | Drop、Thud、Hush | Drop |
 
-### 2.5 小猫养成（后台规则）
+同一次任务的同一种状态只响一次。点 Allow 不会再响提交音。
 
-- 无喂食按钮；完成的任务喂一次（按任务 id 去重，最多记 500）。
-- 可玩耍；饿到阈值或没精力会睡觉；睡时不衰减；下次完成的任务叫醒。
-- **不会死**；无「换新宠物」压力文案。
+## 设置
 
----
+独立玻璃面板，红绿灯在面板内部。四页：
 
-## 3. 通用连接层（多软件架构）
+| 页 | 能做的事 |
+|---|---|
+| General | 复位小猫位置、登录时打开、版本和 build |
+| Pet | 实时预览、尺寸、A–F 外观 |
+| Sound | 点击音，以及提交、完成、卡住三组提示音 |
+| Agents | 每个软件一行 Connect / Disconnect、Cursor 隐私说明、可选的本机文件名和时间记录（默认关，不记聊天正文）、加号菜单开关 |
 
-**需求：** 用户会连接多个产品（现有 Cursor、Codex，后续更多）。所有配置都在 Mochi **设置 → Agents** 里点 Connect 完成，**不要求用户手改任何配置文件**。
+加号菜单可开关：Cursor、Codex、Claude、Gemini、Grok、GPT。
 
-**实现方式：**
+## 软件连接
 
-- 每个软件一个 **Connector（连接器）**，封装：
-  - 该软件的 hook / 配置路径
-  - 权限回执格式（如 Cursor 的 `permission`，Codex 的 `PermissionRequest` stdout）
-  - `connect` / `disconnect` / `status` / `retarget`
-- 设置页一排 Connect；点哪个执行哪个连接器（把 hooks 指到**当前包内**的 `MochiHookCLI`）。
-- 以后接新软件 = 新增一个连接器 + 设置行，UX 不变。
-- 启动时自动 **retarget**，避免多份 `.app` 抢旧路径。
+配置都在设置里点 Connect，不用手改文件。真正按统一连接器做的是 **Cursor** 和 **Codex**。目前已测试完成cursor连接。启动时会把它们的 hook 指回当前这份应用。其余也能连接，仍是各自的安装方式：
 
-**当前一等连接器：**
+- Claude → `~/.claude/settings.json`
+- Copilot → `~/.copilot/hooks/mochi-island.json`
+- OpenCode → `~/.config/opencode/plugins/mochi-island.js`
+- Grok CLI → `~/.grok/hooks/mochi-island.json`
+- Gemini → `~/.gemini/settings.json`
 
-| 软件 | 连接器 | 配置落点（由 Connect 自动写） |
-|------|--------|------------------------------|
-| Cursor | `CursorConnector` | `~/.cursor/hooks.json` |
-| Codex | `CodexConnector` | `~/.codex/hooks.json` + `config.toml` 中 hooks 开关 |
+所有任务进同一份 `~/.cursor/mochi-island-tasks.json`。打开方式：Cursor、Claude、ChatGPT、Grok 优先打开本机 App，没有就打开网站。Codex 没有 App 时打开 Codex 网页。Copilot、OpenCode、Gemini 留在终端。
 
-其它（Claude、Copilot、OpenCode、Grok、Gemini 等）可在设置里连接或已有安装路径，后续可迁入同一 Connector 协议。
+## 小猫养成
 
----
+本机制待开发，目前仅完成文案显示。
 
-## 4. 技术链路（给研发 / 联调）
+没有喂食按钮，也不会死，也没有「换一只」的压力文案。完成一段对话喂一次，按任务 id 去重，最多记 500 次。失败的任务不喂。饥饿到 95 或精力到 0 就睡觉，睡觉时不再衰减；下一次完成的任务把它叫醒。可以玩耍。
 
-```
-用户在 Cursor/Codex 里提交对话或触发工具
-        ↓
-该软件调用本机 Hook → MochiHookCLI（stdin JSON）
-        ↓
-写入 ~/.cursor/mochi-island-tasks.json（统一任务总线）
-        ↓
-Mochi 文件监听 → 更新胶囊图标 / 卡片
-        ↓
-用户 Allow/Deny → ~/.cursor/mochi-island-reply.json
-        ↓
-Hook CLI 读到结果 → stdout 回给 Cursor/Codex
-```
+鼠标停在小猫上，会按当前状态显示一句：
 
-要点：
+| 状态 | 文案 |
+|---|---|
+| 刚吃过 | 吃到啦。 |
+| 心情好 | 心情正好。 |
+| 想玩 | 想玩一会儿。 |
+| 有点困 | 有点困了。 |
+| 肚子空 | 肚子有点空。 |
+| 不想被打扰 | 想自己待一会儿。 |
+| 睡着 | 在睡觉。 |
 
-- **不是** MCP 服务器，也**不是** localhost / socket 总线。  
-- Cursor 的 Shell/MCP 审批走 `beforeShellExecution` / `beforeMCPExecution`；Mochi 只做本机 hook 与 UI。  
-- Codex 审批走 `PermissionRequest` 等 lifecycle hooks。  
-- 完整提示词与命令**不入库**；可保留短 summary 供卡片展示。
+## 隐私
 
----
+Connect Cursor 前有一句本机说明。聊天和命令正文默认不上传，也不留完整副本。权限由用户在本机点 Allow / Deny，或超时拒绝。不用辅助功能去操作 Cursor。
 
-## 5. 隐私与安全（对外口径）
+## 待办
 
-- Connect 前有隐私说明（Cursor）。  
-- 聊天与命令正文默认不上传、不落完整副本。  
-- 权限始终由用户在本机点 Allow/Deny（或超时拒绝）。  
-- 不使用 AppleScript / 辅助功能去操控 Cursor。
-
----
-
-## 6. 已支持 / 进行中 / 未做（状态表）
-
-| 能力 | 状态 |
-|------|------|
-| 小猫 + 上下方向胶囊 + Liquid Glass | 已支持 |
-| 多对话多图标、进行中静默、点击展开 | 已支持（规则已定） |
-| 权限卡 + 摘要行 + Allow/Deny | 已支持 |
-| 设置红绿灯在玻璃内、拖尺寸不卡设置 | 已支持 |
-| Cursor / Codex 一键 Connect（连接器架构） | 已支持 / 落地中 |
-| 点卡片非选项区回原对话 | 需求已定，实现对接唤起对应 App |
-| 正式签名公证 DMG | 未做（缺 Developer ID） |
-| Goose / Cline / Windsurf / Aider 等更长名单 | 未接 |
-
----
-
-## 7. 建议回复组里的话术（可直接贴）
-
-针对「以及当前可以支持的所有功能，需要你给大家有一个视频或者文档阐述一下」：
-
-> 文档已整理好（本文件）。Mochi 当前是桌面小猫 + 胶囊侧栏：在设置里一键 Connect Cursor/Codex（用户不用手改 hook）；对话进行中只在侧栏亮图标、不打扰；点图标看摘要/状态/时间；需要权限时出 Allow/Deny；点卡片非按钮区域可回到对应软件。养成不喂食、不死亡。后续接更多软件走统一连接器，设置体验不变。若需要，我可以再按下面脚本补一段 1～2 分钟演示录屏。
-
----
-
-## 8. 建议演示脚本（录视频用，约 90～120 秒）
-
-1. 打开 Mochi，拖小猫到桌面合适位置。  
-2. 点小猫 → 胶囊弹出；拖到屏幕底部再点 → 展示向上展开。  
-3. 打开设置：展示红绿灯在玻璃内；Agents 里 Connect Cursor（及 Codex）。  
-4. 在 Cursor 提交一句对话 → 胶囊出现 Cursor 图标（不自动弹大卡）。  
-5. 点图标 → 卡片显示状态/时间/缩略；触发 Shell → Allow/Deny。  
-6. 点卡片非按钮区域 → 唤起 Cursor。  
-7. 完成后点开看过 → 图标从胶囊消失。  
-8. （可选）拖 Kitten 尺寸：小猫变、设置面板不跟着抖。
-
----
-
-## 9. 文档维护
-
-- 工程约束与消息协议：仓库根目录 `AGENTS.md`  
-- 架构与连接层：`docs/ARCHITECTURE.md`  
-- 本产品说明（对外/对组）：`docs/PRODUCT-SUMMARY.md`（本文）
-
-如有产品口径变更，请同步改本文第 2～6 节后再转发团队。
+- Developer ID 签名和公证 DMG
+- Goose、Cline、Windsurf、Aider等agent产品等连接
+- A–F 各自独立的宠物图（现在是同一张图换色），需要更多的设计素材
