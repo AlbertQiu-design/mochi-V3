@@ -68,26 +68,50 @@ enum MarkPath {
     }
 }
 
-/// The earlier full kitten-v1 illustration (`kitten-wake.png`), not the simplified mark.
-/// `look` is a letter id (`a`…`f`); until separate art ships, each look tints the same PNG
-/// and stamps a capital letter badge so Settings preview and the desktop capsule match.
+/// Full kitten artwork for the desktop and Settings preview.
+/// `look` keeps the existing tint and letter badge for the placeholder pets.
 struct FullKitten: View {
     var look: String = "a"
+    var artwork: String = "idle"
+    var dragDirection: String? = nil
 
     private var resolved: String { IslandPrefs.normalizeLook(look) }
 
     var body: some View {
         ZStack {
-            base
-                .colorMultiply(PetLookStyle.tint(for: resolved))
+            Group {
+                if let dragDirection {
+                    TimelineView(.animation(minimumInterval: 0.25)) { context in
+                        let phase = Int(context.date.timeIntervalSinceReferenceDate * 4) % 2 == 0 ? "a" : "b"
+                        base(named: "drag-\(dragDirection)-\(phase)")
+                    }
+                } else {
+                    base(named: artwork)
+                }
+            }
+            .colorMultiply(PetLookStyle.tint(for: resolved))
             letterBadge
         }
         .accessibilityLabel("Pet \(IslandPrefs.petLetter(for: resolved))")
     }
 
     @ViewBuilder
-    private var base: some View {
-        if let image = Self.artwork {
+    private func base(named name: String) -> some View {
+        if let image = Self.images[name] {
+            GeometryReader { geometry in
+                let side = min(geometry.size.width, geometry.size.height)
+                let placement = Self.placement(for: name)
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
+                    .frame(width: side, height: side)
+                    .scaleEffect(placement.scale)
+                    .offset(x: side * placement.x, y: side * placement.y)
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                    .clipped()
+            }
+        } else if let image = Self.fallback {
             Image(nsImage: image)
                 .resizable()
                 .interpolation(.high)
@@ -113,10 +137,52 @@ struct FullKitten: View {
         .allowsHitTesting(false)
     }
 
-    static let artwork: NSImage? = {
-        guard let url = Bundle.main.url(forResource: "kitten-wake", withExtension: "png", subdirectory: "Web/pets") else {
-            return nil
+    private struct Placement {
+        var scale: CGFloat
+        var x: CGFloat
+        var y: CGFloat
+    }
+
+    /// The delivered images share transparent canvases but their painted bounds differ.
+    /// Center the painted area while keeping the original image files untouched.
+    private static func placement(for name: String) -> Placement {
+        let bounds: CGRect
+        let source: CGFloat
+        switch name {
+        case "idle": bounds = CGRect(x: 339, y: 475, width: 420, height: 426); source = 1024
+        case "working": bounds = CGRect(x: 345, y: 350, width: 547, height: 551); source = 1024
+        case "done": bounds = CGRect(x: 285, y: 253, width: 551, height: 568); source = 1024
+        case "interrupted": bounds = CGRect(x: 303, y: 631, width: 587, height: 270); source = 1024
+        case "needs-check": bounds = CGRect(x: 329, y: 129, width: 595, height: 772); source = 1024
+        case "needs-input": bounds = CGRect(x: 347, y: 404, width: 562, height: 497); source = 1024
+        case "needs-permission": bounds = CGRect(x: 287, y: 185, width: 503, height: 716); source = 1024
+        default: bounds = CGRect(x: 82, y: 15, width: 89, height: 193); source = 256
         }
+        let scale = 0.88 * source / max(bounds.width, bounds.height)
+        return Placement(
+            scale: scale,
+            x: (source / 2 - bounds.midX) / source * scale,
+            y: (source / 2 - bounds.midY) / source * scale
+        )
+    }
+
+    private static let images: [String: NSImage] = {
+        let statuses = ["idle", "working", "done", "interrupted", "needs-check", "needs-input", "needs-permission"]
+        let directions = ["center", "left", "right", "up"]
+        let frames = directions.flatMap { direction in
+            ["a", "b"].map { "drag-\(direction)-\($0)" }
+        }
+        var result: [String: NSImage] = [:]
+        for name in statuses + frames {
+            guard let url = Bundle.main.url(forResource: "pet-\(name)", withExtension: "png", subdirectory: "Web/pets"),
+                  let image = NSImage(contentsOf: url) else { continue }
+            result[name] = image
+        }
+        return result
+    }()
+
+    private static let fallback: NSImage? = {
+        guard let url = Bundle.main.url(forResource: "kitten-wake", withExtension: "png", subdirectory: "Web/pets") else { return nil }
         return NSImage(contentsOf: url)
     }()
 }
