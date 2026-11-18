@@ -126,6 +126,7 @@ final class IslandController: NSObject, WKScriptMessageHandler, WKNavigationDele
     private let capsule = KittenShell()
     private var primedAlerts = false
     private var seenAlertKeys: Set<String> = []
+    private var visiblePermissionKeys: Set<String> = []
     private let settings = SettingsChrome()
 
     func start() {
@@ -390,7 +391,7 @@ final class IslandController: NSObject, WKScriptMessageHandler, WKNavigationDele
         }
     }
 
-    /// Finished chats open once. Submit, done, and stuck cues play on the status change.
+    /// A new permission request opens its choices. Finished chats still open once.
     private func considerAlerts(tasks: [[String: Any]], slots: [[String: Any]]) {
         var read: [String: Bool] = [:]
         for slot in slots {
@@ -403,23 +404,42 @@ final class IslandController: NSObject, WKScriptMessageHandler, WKNavigationDele
             }
         }
         var pending: [(id: String, updated: Double, status: String)] = []
+        var permissions: [(id: String, updated: Double, key: String)] = []
         for task in tasks {
             let id = task["id"] as? String ?? ""
             let status = task["status"] as? String ?? ""
-            // Never auto-open for running or wait. Icons stay visible; click expands.
-            guard !id.isEmpty, status == "done" || status == "fail" else { continue }
-            if read[id] == true { continue }
+            guard !id.isEmpty else { continue }
             let updated = (task["updated"] as? NSNumber)?.doubleValue ?? (task["updated"] as? Double) ?? 0
+            let optionIDs = (task["options"] as? [[String: String]] ?? []).compactMap { $0["id"] }
+            if status == "wait", PermissionCopy.isPermission(
+                kind: task["kind"] as? String ?? "",
+                status: status,
+                optionIDs: optionIDs
+            ) {
+                let requestID = task["request_id"] as? String ?? ""
+                let key = "\(id)|\(requestID.isEmpty ? String(updated) : requestID)"
+                permissions.append((id, updated, key))
+                continue
+            }
+            // Other waiting tasks still require a click on their icon.
+            guard status == "done" || status == "fail" else { continue }
+            if read[id] == true { continue }
             pending.append((id, updated, status))
         }
+        let freshPermissions = permissions.filter { !visiblePermissionKeys.contains($0.key) }
+        visiblePermissionKeys = Set(permissions.map(\.key))
         let keys = Set(pending.map { "\($0.id)|\($0.status)" })
+        let fresh = primedAlerts ? pending.filter { !seenAlertKeys.contains("\($0.id)|\($0.status)") } : []
         if !primedAlerts {
             primedAlerts = true
             seenAlertKeys = keys
+        } else {
+            seenAlertKeys.formUnion(keys)
+        }
+        if let newest = freshPermissions.max(by: { $0.updated < $1.updated }) {
+            capsule.presentAlert(id: newest.id)
             return
         }
-        let fresh = pending.filter { !seenAlertKeys.contains("\($0.id)|\($0.status)") }
-        seenAlertKeys.formUnion(keys)
         guard let newest = fresh.max(by: { $0.updated < $1.updated }) else { return }
         capsule.presentAlert(id: newest.id)
     }

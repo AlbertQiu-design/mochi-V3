@@ -16,25 +16,27 @@ if ! xcodebuild -version >/dev/null 2>&1; then
   done
 fi
 xcodebuild -version
-DERIVED="$ROOT/.build/XcodeDerivedData"
-LOG="$DERIVED/build-app.log"
-mkdir -p "$DERIVED"
-# Same compile as Xcode Cmd+B on Package.swift (not a SwiftPM-only substitute).
-xcodebuild \
-  -scheme MochiIsland \
-  -destination "generic/platform=macOS" \
-  -configuration Release \
-  -derivedDataPath "$DERIVED" \
-  -quiet \
-  build | tee "$LOG"
-xcodebuild \
-  -scheme MochiHookCLI \
-  -destination "generic/platform=macOS" \
-  -configuration Release \
-  -derivedDataPath "$DERIVED" \
-  -quiet \
-  build | tee -a "$LOG"
-BIN="$DERIVED/Build/Products/Release"
+BUILD_ROOT="$ROOT/.build/AppBuild"
+LOG="$BUILD_ROOT/build-app.log"
+mkdir -p "$BUILD_ROOT/ModuleCache"
+export CLANG_MODULE_CACHE_PATH="$BUILD_ROOT/ModuleCache"
+export SWIFTPM_MODULECACHE_OVERRIDE="$BUILD_ROOT/ModuleCache"
+# This repository is a Swift package without an .xcodeproj or .xcworkspace.
+# Xcode 27 does not accept the package directory as an xcodebuild project.
+SWIFT_ARGS=(
+  -c release
+  --scratch-path "$BUILD_ROOT/SwiftPM"
+  --cache-path "$BUILD_ROOT/cache"
+  --config-path "$BUILD_ROOT/config"
+  --security-path "$BUILD_ROOT/security"
+  --manifest-cache local
+)
+if [[ "${MOCHI_RESTRICTED_BUILD:-0}" == "1" ]]; then
+  SWIFT_ARGS+=(--disable-sandbox -debug-info-format none --disable-index-store)
+fi
+swift build "${SWIFT_ARGS[@]}" --product MochiIsland | tee "$LOG"
+swift build "${SWIFT_ARGS[@]}" --product MochiHookCLI | tee -a "$LOG"
+BIN="$BUILD_ROOT/SwiftPM/out/Products/Release"
 APP="$ROOT/island/MochiIsland.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/Web/pets" "$APP/Contents/Resources/Web/status"
 cp "$BIN/MochiIsland" "$BIN/MochiHookCLI" "$APP/Contents/MacOS/"
@@ -60,5 +62,8 @@ if pids="$(pgrep -x MochiIsland)"; then
     sleep 0.1
   done
 fi
-open "$APP"
-echo "Opened $APP"
+if open "$APP"; then
+  echo "Opened $APP"
+else
+  echo "Built successfully, but automatic opening failed; open $APP manually." >&2
+fi

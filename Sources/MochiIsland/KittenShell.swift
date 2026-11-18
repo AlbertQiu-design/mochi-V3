@@ -24,6 +24,9 @@ final class KittenModel: ObservableObject {
     @Published var capsuleWidth: CGFloat = AppConfig.kittenSize
     @Published var petScale: CGFloat = 1
     @Published var look: String = "a"
+    @Published var petArtwork = "idle"
+    @Published var petDragging = false
+    @Published var dragDirection = "center"
     @Published var opensUp = false
     @Published var selectionMoving = false
 }
@@ -115,7 +118,11 @@ struct KittenRoot: View {
     private var kittenWell: some View {
         let side = AppConfig.kittenSize * model.petScale
         return ZStack {
-            FullKitten(look: model.look)
+            FullKitten(
+                look: model.look,
+                artwork: model.petArtwork,
+                dragDirection: model.petDragging ? model.dragDirection : nil
+            )
                 .frame(width: side, height: side)
                 .matchedGeometryEffect(id: "kitten-art", in: kittenNS)
             if model.rows.contains(where: \.showsDot) {
@@ -197,7 +204,11 @@ struct KittenRoot: View {
         let s = model.petScale
         let icon = AppConfig.agentIcon * s
         return ZStack {
-            FullKitten(look: model.look)
+            FullKitten(
+                look: model.look,
+                artwork: model.petArtwork,
+                dragDirection: model.petDragging ? model.dragDirection : nil
+            )
                 .frame(width: icon, height: icon)
             if model.rows.contains(where: \.showsDot) {
                 Circle()
@@ -300,6 +311,7 @@ final class KittenShell: NSObject {
     private var positionToken = ""
     private var dragging = false
     private var dragFrame = NSRect.zero
+    private var lastDragDelta = CGSize.zero
     private var remembered: [String: String] = [:]
     private var timbre = "boop"
     private var cueSubmit = IslandPrefs.submitSounds[0]
@@ -576,6 +588,8 @@ final class KittenShell: NSObject {
             (row.status == "running" || row.status == "wait") && !previousIDs.contains(row.id)
         }
         model.rows = nextRows
+        let artwork = petArtwork(rows: nextRows, tasks: taskByID)
+        if model.petArtwork != artwork { model.petArtwork = artwork }
         if reveal {
             model.expanded = true
         }
@@ -601,6 +615,26 @@ final class KittenShell: NSObject {
         rowSignature = signature
         if !dragging { layout(animated: rowsChanged && positioned) }
         retainOpenBubble()
+    }
+
+    /// Reuse the visible task states only for the kitten illustration; task and card behavior is unchanged.
+    private func petArtwork(rows: [KittenRow], tasks: [String: [String: Any]]) -> String {
+        let visibleIDs = Set(rows.flatMap(\.memberIDs))
+        let visibleTasks = visibleIDs.compactMap { tasks[$0] }
+        let waiting = visibleTasks.filter { string($0["status"]) == "wait" }
+        if waiting.contains(where: { task in
+            PermissionCopy.isPermission(
+                kind: string(task["kind"]),
+                status: "wait",
+                optionIDs: choices(task["options"]).map(\.id)
+            )
+        }) { return "needs-permission" }
+        if waiting.contains(where: { !choices($0["options"]).isEmpty }) { return "needs-input" }
+        if !waiting.isEmpty || rows.contains(where: { $0.status == "wait" }) { return "needs-check" }
+        if rows.contains(where: { $0.status == "running" }) { return "working" }
+        if rows.contains(where: { $0.status == "fail" }) { return "interrupted" }
+        if rows.contains(where: { $0.status == "done" }) { return "done" }
+        return "idle"
     }
 
     func layoutInHost() {
@@ -738,10 +772,28 @@ final class KittenShell: NSObject {
             self.dragFrame = self.hitFrame
             self.dragging = false
             self.trackingPointer = true
+            self.lastDragDelta = .zero
+            self.model.petDragging = false
+            self.model.dragDirection = "center"
         }
         mouse.onDrag = { [weak self] delta in
             guard let self else { return }
             if hypot(delta.width, delta.height) < AppConfig.dragThreshold { return }
+            let step = CGSize(
+                width: delta.width - self.lastDragDelta.width,
+                height: delta.height - self.lastDragDelta.height
+            )
+            self.lastDragDelta = delta
+            if !self.model.petDragging { self.model.petDragging = true }
+            if hypot(step.width, step.height) >= 1 {
+                let direction: String
+                if abs(step.width) >= abs(step.height) {
+                    direction = step.width < 0 ? "left" : "right"
+                } else {
+                    direction = step.height > 0 ? "up" : "center"
+                }
+                if self.model.dragDirection != direction { self.model.dragDirection = direction }
+            }
             self.dragging = true
             self.hideTip()
             var frame = self.dragFrame
@@ -760,6 +812,8 @@ final class KittenShell: NSObject {
         }
         mouse.onUp = { [weak self] dragged, local in
             guard let self else { return }
+            self.model.petDragging = false
+            self.model.dragDirection = "center"
             if dragged {
                 let ratios = ShellGeometry.ratios(anchor: self.anchor, screen: self.canvas().full)
                 self.dock = ratios.x < 0.5 ? "left" : "right"
