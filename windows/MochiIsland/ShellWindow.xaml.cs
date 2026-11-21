@@ -38,7 +38,6 @@ namespace MochiIsland
         private string chromeKey = "";
         private bool upward;
         private int dotPhase;
-        private double selectionY;
         private double selectionTarget;
         private bool selectionMoving;
 
@@ -338,11 +337,11 @@ namespace MochiIsland
             rows.Add(new ChromeRow(kind, id, top, height));
         }
 
-        private UIElement Face(string kind, AgentIconRow? icon, string title)
+        private FrameworkElement Face(string kind, AgentIconRow? icon, string title)
         {
-            if (icon != null)
+            if (icon is AgentIconRow row)
             {
-                var path = Path.Combine(AppContext.BaseDirectory, "Web", "pets", SlotFace.AgentMark(icon.Source) + ".png");
+                var path = Path.Combine(AppContext.BaseDirectory, "Web", "pets", SlotFace.AgentMark(row.Source) + ".png");
                 if (File.Exists(path))
                 {
                     var image = new Image
