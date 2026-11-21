@@ -63,7 +63,7 @@ public class InstallerTests
         Assert.True(blocked.NeedsPrivacy);
         Assert.False(blocked.Connected);
         var installed = HookInstaller.InstallCodex(config, hooks, binary, true);
-        Assert.True(installed.Connected);
+        Assert.True(installed.Connected, installed.Error);
         var configText = File.ReadAllText(config);
         Assert.Contains("js_repl = false", configText);
         Assert.Contains("hooks = true", configText);
@@ -93,6 +93,24 @@ public class InstallerTests
         Assert.Equal("sha256:ec9f0f6f204d083b20d1a5e387cf986cd849ae75dea4124e209d86141ec35f0c", CodexHookTrust.IdentityHash("session_end", sample, 10));
         Assert.Equal(3, CodexHookTrust.NormalizedTimeout("session_end", 10));
         Assert.Equal(10, CodexHookTrust.NormalizedTimeout("user_prompt_submit", 10));
+    }
+
+    [Fact]
+    public void CodexTrustKeepsAWindowsPath()
+    {
+        var key = @"C:\Users\mochi\.codex\hooks.json:user_prompt_submit:0:0";
+        var hash = CodexHookTrust.IdentityHash("user_prompt_submit", @"C:\Mochi\MochiHookCLI.exe --source codex", 10);
+        var once = CodexHookTrust.ConfigByTrusting("[features]\nhooks = true\n", [(key, hash)]);
+        Assert.Contains(@"[hooks.state.""C:\\Users\\mochi\\.codex\\hooks.json:user_prompt_submit:0:0""]", once);
+        Assert.Equal(once, CodexHookTrust.ConfigByTrusting(once, [(key, hash)]));
+    }
+
+    [Fact]
+    public void OpenCodePluginEscapesAWindowsPath()
+    {
+        var script = PassiveHooks.OpenCodePlugin(@"C:\Program Files\Mochi\MochiHookCLI.exe");
+        Assert.Contains(@"const cli = ""C:\\Program Files\\Mochi\\MochiHookCLI.exe""", script);
+        Assert.DoesNotContain(@"C:\Program Files", script);
     }
 
     [Fact]
@@ -277,7 +295,8 @@ public class InstallerTests
         var plugin = Path.Combine(directory, "plugins", "mochi-island.js");
         Directory.CreateDirectory(Path.GetDirectoryName(plugin)!);
         File.WriteAllText(plugin, "old-plugin");
-        Assert.True(PassiveHooks.InstallOpenCode(plugin, binary, true).Connected);
+        var openCode = PassiveHooks.InstallOpenCode(plugin, binary, true);
+        Assert.True(openCode.Connected, openCode.Error);
         Assert.Equal("old-plugin", File.ReadAllText(plugin + ".mochi-island.bak"));
         var script = File.ReadAllText(plugin);
         foreach (var name in new[] { "session.status", "tool.execute.before", "permission.asked", "question.asked", "session.error" })

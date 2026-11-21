@@ -122,8 +122,12 @@ public static class PassiveHooks
 
     public static string OpenCodePlugin(string cli)
     {
-        var quoted = cli.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal);
-        return PluginTemplate.Replace("@@CLI@@", quoted, StringComparison.Ordinal);
+        return PluginTemplate.Replace("@@CLI@@", JsString(cli), StringComparison.Ordinal);
+    }
+
+    private static string JsString(string cli)
+    {
+        return cli.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal);
     }
 
     private static bool Ready(string binaryPath, bool privacyAccepted)
@@ -190,7 +194,7 @@ public static class PassiveHooks
         if (!FileBits.IsExecutable(binaryPath) || !File.Exists(pluginPath)) return false;
         var text = File.ReadAllText(pluginPath);
         return text.Contains("mochi-island", StringComparison.Ordinal)
-            && text.Contains(binaryPath, StringComparison.Ordinal)
+            && text.Contains(JsString(binaryPath), StringComparison.Ordinal)
             && text.Contains("\"--source\", \"opencode\"", StringComparison.Ordinal)
             && text.Contains("session.status", StringComparison.Ordinal)
             && text.Contains("tool.execute.before", StringComparison.Ordinal)

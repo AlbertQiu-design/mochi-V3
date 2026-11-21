@@ -279,7 +279,23 @@ public static class CodexHookTrust
         var start = prefix.Length;
         var end = trimmed.Length - 2;
         if (start > end) return null;
-        return trimmed[start..end].Replace("\\\"", "\"", StringComparison.Ordinal);
+        return Unescape(trimmed[start..end]);
+    }
+
+    private static string Unescape(string value)
+    {
+        var builder = new StringBuilder(value.Length);
+        for (var index = 0; index < value.Length; index++)
+        {
+            if (value[index] == '\\' && index + 1 < value.Length)
+            {
+                builder.Append(value[index + 1]);
+                index++;
+                continue;
+            }
+            builder.Append(value[index]);
+        }
+        return builder.ToString();
     }
 
     private static bool IsTableHeader(string line)
