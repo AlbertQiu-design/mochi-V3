@@ -8,6 +8,10 @@ A Mac kitten that lives on the desktop. The shipping app is Swift plus a thin we
 
 `swift run -c debug MochiCoreChecks` runs the play, save, and hook checks.
 
+## Windows
+
+The Mac app stays Swift. Windows is a separate WinUI 3 shell in `windows/MochiIsland`, with the same rules in `windows/Mochi.Core` and the hook program in `windows/Mochi.HookCLI`. There is no local web server, Python, or Electron on either platform. Preferences and the pet live in `%APPDATA%\MochiIsland`. Tasks and hooks stay under `%USERPROFILE%\.cursor` (and the other products' own folders). `dotnet test windows/Mochi.sln` checks the rules on a Mac. The WinUI project builds on Windows 11. The hook executable is published with `dotnet publish windows/Mochi.HookCLI/Mochi.HookCLI.csproj -r win-x64 --self-contained`.
+
 ## Layout
 
 - `Sources/MochiCore/` — pet rules, save files, Cursor hook install. No AppKit.

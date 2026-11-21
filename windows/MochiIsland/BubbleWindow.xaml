@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="MochiIsland.BubbleWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Canvas x:Name="Root" Background="Transparent">
+        <Canvas.Resources>
+            <Style TargetType="TextBlock">
+                <Setter Property="FontFamily" Value="Microsoft YaHei UI"/>
+            </Style>
+        </Canvas.Resources>
+        <Border x:Name="Body" CornerRadius="12" Padding="12,8" Background="Transparent">
+            <ScrollViewer x:Name="Scroller" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                <StackPanel x:Name="Card"/>
+            </ScrollViewer>
+        </Border>
+        <Canvas x:Name="BeakHost"/>
+    </Canvas>
+</Window>

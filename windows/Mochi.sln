@@ -1,0 +1,34 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mochi.Core", "Mochi.Core\Mochi.Core.csproj", "{C9459253-964E-4659-ADC4-444C42311480}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mochi.Core.Tests", "Mochi.Core.Tests\Mochi.Core.Tests.csproj", "{A2D3ADE3-9818-4CFF-AD8F-4CC637471F6D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Mochi.HookCLI", "Mochi.HookCLI\Mochi.HookCLI.csproj", "{52F88B05-8DB7-449F-B856-BBE14565A8D4}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{C9459253-964E-4659-ADC4-444C42311480}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C9459253-964E-4659-ADC4-444C42311480}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C9459253-964E-4659-ADC4-444C42311480}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C9459253-964E-4659-ADC4-444C42311480}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A2D3ADE3-9818-4CFF-AD8F-4CC637471F6D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A2D3ADE3-9818-4CFF-AD8F-4CC637471F6D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A2D3ADE3-9818-4CFF-AD8F-4CC637471F6D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A2D3ADE3-9818-4CFF-AD8F-4CC637471F6D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{52F88B05-8DB7-449F-B856-BBE14565A8D4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{52F88B05-8DB7-449F-B856-BBE14565A8D4}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{52F88B05-8DB7-449F-B856-BBE14565A8D4}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{52F88B05-8DB7-449F-B856-BBE14565A8D4}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

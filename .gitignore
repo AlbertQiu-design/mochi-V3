@@ -14,3 +14,6 @@ island_offset.json
 .mochi-latency-addendum.txt
 .mochi-latency-result.txt
 .mochi-shots/
+windows/**/bin/
+windows/**/obj/
+windows/**/publish/
