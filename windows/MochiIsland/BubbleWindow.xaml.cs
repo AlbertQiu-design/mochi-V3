@@ -24,6 +24,18 @@ namespace MochiIsland
 
     public sealed partial class BubbleWindow : Window
     {
+        private static readonly Dictionary<string, BitmapImage> imageCache = new();
+
+        private static BitmapImage CachedImage(string path)
+        {
+            if (!imageCache.TryGetValue(path, out var image))
+            {
+                image = new BitmapImage(new Uri(path));
+                imageCache[path] = image;
+            }
+            return image;
+        }
+
         private IntPtr hwnd;
         private bool shown;
         private string contentKey = "";
@@ -38,35 +50,23 @@ namespace MochiIsland
             presenter.IsMaximizable = false;
             presenter.IsMinimizable = false;
             AppWindow.SetPresenter(presenter);
-            SystemBackdrop = new DesktopAcrylicBackdrop();
+            SystemBackdrop = null;
         }
 
         public void Show(BubbleModel model, RectInt32 pixels, double scale)
         {
             if (hwnd == IntPtr.Zero) hwnd = NativeWindow.Prepare(this);
             AppWindow.MoveAndResize(pixels);
-            var bodyX = (int)Math.Round(model.BodyX * scale);
-            var bodyWidth = Math.Max(1, pixels.Width - (int)Math.Round(AppConfig.BeakWidth * scale));
-            var beakX = model.PointsRight ? bodyWidth : 0;
-            var beakY = (int)Math.Round(model.BeakTop * scale);
-            var beakW = Math.Max(1, (int)Math.Round(AppConfig.BeakWidth * scale));
-            var beakH = Math.Max(1, (int)Math.Round(AppConfig.BeakHeight * scale));
-            Canvas.SetLeft(Body, model.BodyX);
+            NativeWindow.EnsureTopMost(hwnd);
+            Canvas.SetLeft(Body, 0);
             Canvas.SetTop(Body, 0);
-            Body.Width = pixels.Width / scale - AppConfig.BeakWidth;
+            Body.Width = pixels.Width / scale;
             Body.Height = pixels.Height / scale;
             BeakHost.Children.Clear();
-            var tip = new Border
-            {
-                Width = AppConfig.BeakWidth,
-                Height = AppConfig.BeakHeight,
-                Background = new SolidColorBrush(Color.FromArgb(36, 255, 255, 255)),
-                CornerRadius = new CornerRadius(3)
-            };
-            Canvas.SetLeft(tip, model.PointsRight ? Body.Width : 0);
-            Canvas.SetTop(tip, model.BeakTop);
-            BeakHost.Children.Add(tip);
-            NativeWindow.SetBubble(hwnd, bodyX, 0, bodyWidth, pixels.Height, (int)Math.Round(AppConfig.BubbleRadius * scale), beakX, beakY, beakW, beakH);
+            // A plain rectangular window with DWM rounding has smooth antialiased
+            // corners; a window region would give the jagged edge this replaces.
+            NativeWindow.ClearRegion(hwnd);
+            NativeWindow.SetRoundCorners(hwnd);
             var key = model.Picker
                 ? "picker:" + string.Join(",", model.Sources)
                 : (model.Task?.Id ?? "") + "|" + (model.Task?.Status ?? "") + "|" + model.Answer + "|" + model.Expanded;
@@ -98,10 +98,19 @@ namespace MochiIsland
                 var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Center };
                 foreach (var source in model.Sources)
                 {
-                    var button = new Button { Width = 36, Height = 36, Padding = new Thickness(4), Background = new SolidColorBrush(Color.FromArgb(0, 0, 0, 0)) };
+                    var button = new Button
+                    {
+                        Width = 36,
+                        Height = 36,
+                        Padding = new Thickness(0),
+                        CornerRadius = new CornerRadius(9),
+                        UseSystemFocusVisuals = false,
+                        BorderThickness = new Thickness(0),
+                        Background = new SolidColorBrush(Color.FromArgb(0, 0, 0, 0))
+                    };
                     var path = Path.Combine(AppContext.BaseDirectory, "Web", "pets", SlotFace.AgentMark(source) + ".png");
                     button.Content = File.Exists(path)
-                        ? new Image { Source = new BitmapImage(new Uri(path)), Width = 28, Height = 28 }
+                        ? new Image { Source = CachedImage(path), Width = 28, Height = 28, Stretch = Stretch.Uniform }
                         : new TextBlock { Text = SlotFace.DisplayName(source)[..1], FontSize = 16, HorizontalAlignment = HorizontalAlignment.Center };
                     var picked = source;
                     button.Click += (_, _) => model.Open(picked);

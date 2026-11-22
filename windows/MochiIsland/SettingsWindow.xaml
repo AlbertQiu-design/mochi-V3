@@ -14,7 +14,10 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
-        <Button x:Name="CloseButton" Content="✕" Width="28" Height="28" HorizontalAlignment="Left" FontFamily="Microsoft YaHei UI"/>
+        <Button x:Name="CloseButton" Content="✕" Width="28" Height="28" HorizontalAlignment="Left"
+                Padding="0" FontSize="13" CornerRadius="14" UseSystemFocusVisuals="False"
+                HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+                FontFamily="Microsoft YaHei UI"/>
         <Grid x:Name="TabBar" Grid.Row="1" Height="32"/>
         <Grid x:Name="Pages" Grid.Row="2"/>
     </Grid>

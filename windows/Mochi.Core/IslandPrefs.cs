@@ -13,6 +13,7 @@ public sealed class IslandPrefs
     public static readonly string[] Docks = ["left", "right"];
     public static readonly string[] PickerOrder = ["cursor", "codex", "claude", "gemini", "grok-bot", "gpt"];
     public static readonly string[] PetLooks = ["a", "b", "c", "d", "e", "f"];
+    public static readonly string[] Languages = ["system", "zh", "en"];
 
     public double Dx { get; set; }
     public double Dy { get; set; }
@@ -28,6 +29,7 @@ public sealed class IslandPrefs
     public string SoundDone { get; set; } = "chime";
     public string SoundStuck { get; set; } = "drop";
     public string Look { get; set; } = "a";
+    public string Language { get; set; } = "system";
     public double PetScale { get; set; } = 1;
     public double BubbleScale { get; set; } = 1;
     public bool CursorPrivacyAccepted { get; set; }
@@ -88,6 +90,7 @@ public sealed class IslandPrefs
             ["sound_done"] = SoundDone,
             ["sound_stuck"] = SoundStuck,
             ["look"] = Look,
+            ["language"] = Language,
             ["pet_scale"] = PetScale,
             ["bubble_scale"] = BubbleScale,
             ["dock"] = Dock,
@@ -123,6 +126,7 @@ public sealed class IslandPrefs
         {
             next.Look = NormalizeLook(look);
         }
+        if (Get(json, "language") is string language && Languages.Contains(language)) next.Language = language;
         next.PetScale = Scale(Get(json, "pet_scale"), next.PetScale);
         next.BubbleScale = Scale(Get(json, "bubble_scale"), next.BubbleScale);
         if (json.ContainsKey("cursor_privacy_accepted"))
@@ -172,6 +176,7 @@ public sealed class IslandPrefs
             SoundDone = String(root, "sound_done", "chime"),
             SoundStuck = String(root, "sound_stuck", "drop"),
             Look = String(root, "look", "a"),
+            Language = String(root, "language", "system"),
             PetScale = Double(root, "petScale", 1),
             BubbleScale = Double(root, "bubbleScale", 1),
             CursorPrivacyAccepted = Bool(root, "cursorPrivacyAccepted", false),
@@ -209,6 +214,7 @@ public sealed class IslandPrefs
             SoundDone = SoundDone,
             SoundStuck = SoundStuck,
             Look = Look,
+            Language = Language,
             PetScale = PetScale,
             BubbleScale = BubbleScale,
             CursorPrivacyAccepted = CursorPrivacyAccepted,
@@ -233,6 +239,7 @@ public sealed class IslandPrefs
         SoundDone = DoneSounds.Contains(SoundDone) ? SoundDone : "chime";
         SoundStuck = StuckSounds.Contains(SoundStuck) ? SoundStuck : "drop";
         Look = NormalizeLook(Look);
+        Language = Languages.Contains(Language) ? Language : "system";
         Dock = Docks.Contains(Dock) ? Dock : "right";
         KittenX = Unit(KittenX);
         KittenY = Unit(KittenY);
@@ -257,6 +264,7 @@ public sealed class IslandPrefs
             SoundDone = SoundDone,
             SoundStuck = SoundStuck,
             Look = Look,
+            Language = Language,
             PetScale = PetScale,
             BubbleScale = BubbleScale,
             CursorPrivacyAccepted = CursorPrivacyAccepted,
@@ -330,6 +338,7 @@ public sealed class IslandPrefs
         [JsonPropertyName("sound_done")] public string SoundDone { get; set; } = "";
         [JsonPropertyName("sound_stuck")] public string SoundStuck { get; set; } = "";
         [JsonPropertyName("look")] public string Look { get; set; } = "";
+        [JsonPropertyName("language")] public string Language { get; set; } = "";
         [JsonPropertyName("petScale")] public double PetScale { get; set; }
         [JsonPropertyName("bubbleScale")] public double BubbleScale { get; set; }
         [JsonPropertyName("cursorPrivacyAccepted")] public bool CursorPrivacyAccepted { get; set; }

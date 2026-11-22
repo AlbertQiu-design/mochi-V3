@@ -43,22 +43,30 @@ jobs:
 
       - name: Zip
         shell: pwsh
-        run: Compress-Archive -Path artifacts/MochiIsland/* -DestinationPath MochiIsland-Windows-1.0.zip -Force
+        run: Compress-Archive -Path artifacts/MochiIsland/* -DestinationPath MochiIsland-Windows-2.0.zip -Force
 
       - name: Upload release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0-windows1
-          name: Mochi Island 1.0 for Windows
+          tag_name: v2.0-windows
+          name: Mochi Island 2.0 for Windows
           make_latest: false
-          files: MochiIsland-Windows-1.0.zip
+          files: MochiIsland-Windows-2.0.zip
           body: |
             Windows 11 22H2（22621）或更新。解压后直接运行，不需要再装运行库。
 
-            1. 下载 `MochiIsland-Windows-1.0.zip`，解压到一个单独的文件夹。不要只把 exe 拖出来。
+            1. 下载 `MochiIsland-Windows-2.0.zip`，解压到一个单独的文件夹。不要只把 exe 拖出来。
             2. 双击 `MochiIsland.exe`。
             3. 如果系统提示无法验证发布者，点「更多信息」，再点「仍要运行」。
-            4. 小猫出现后，点齿轮打开设置，在 Agents 里点 Connect。
+            4. 小猫出现后，点齿轮打开设置，在智能体里给 Claude Code / Cursor / Codex / Grok Bot 各点一次 Connect。
+
+            本版更新：
+            - Claude Code / Cursor / Codex / Grok Bot 连接器（一键安装 hook，不需要手改配置）
+            - Grok Bot 桌面版状态读取
+            - Agent 状态动效（运行蓝点 / 完成绿环勾 / 等待红叉）
+            - 拖拽换帧；图标、加号、齿轮随宠物尺寸缩放
+            - 毛色 A–F、中英文设置、小猫图片与应用图标更新
+            - 透明窗口、窗口去边与拖动稳定性修复
 
             `MochiHookCLI.exe` 必须和 `MochiIsland.exe` 留在同一个文件夹。连接只写在这一台电脑上。
 

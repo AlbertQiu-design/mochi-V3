@@ -123,7 +123,12 @@ public static class Program
         try
         {
             var environment = Environment.GetEnvironmentVariables();
-            HookSession.Run(Console.In, Console.Out, args, environment, AppConfig.TasksFile);
+            // Hooks are fed UTF-8 JSON by the agents, but a Windows console defaults
+            // to the OEM code page; without this, Chinese prompts arrive garbled.
+            var encoding = new System.Text.UTF8Encoding(false);
+            using var input = new System.IO.StreamReader(Console.OpenStandardInput(), encoding);
+            using var output = new System.IO.StreamWriter(Console.OpenStandardOutput(), encoding) { AutoFlush = true };
+            HookSession.Run(input, output, args, environment, AppConfig.TasksFile);
         }
         catch
         {
