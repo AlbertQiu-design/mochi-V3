@@ -401,14 +401,15 @@ public class HookRulesTests
     [Fact]
     public void ConnectorRegistryNamesCursorAndCodex()
     {
-        Assert.Equal(["cursor", "codex", "grok-bot"], AgentConnectorRegistry.Primary.Select(item => item.Id));
+        Assert.Equal(["cursor", "claude", "codex", "grok-bot"], AgentConnectorRegistry.Primary.Select(item => item.Id));
         Assert.Equal("Cursor", AgentConnectorRegistry.Connector("cursor")!.DisplayName);
+        Assert.Equal("Claude Code", AgentConnectorRegistry.Connector("claude")!.DisplayName);
         Assert.Equal("Codex", AgentConnectorRegistry.Connector("codex")!.DisplayName);
         Assert.Equal("Grok Bot", AgentConnectorRegistry.Connector("grok")!.DisplayName);
         Assert.Equal("grok-bot", AgentConnectorRegistry.Connector("grok-bot")!.Id);
         Assert.True(AgentConnectorRegistry.Connector("cursor")!.NeedsPrivacyAck);
         Assert.False(AgentConnectorRegistry.Connector("codex")!.NeedsPrivacyAck);
         Assert.False(AgentConnectorRegistry.Connector("grok-bot")!.NeedsPrivacyAck);
-        Assert.Null(AgentConnectorRegistry.Connector("claude"));
+        Assert.True(AgentConnectorRegistry.Connector("claude")!.NeedsPrivacyAck);
     }
 }

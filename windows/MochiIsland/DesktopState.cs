@@ -40,6 +40,16 @@ public sealed class DesktopState
     public void Refresh(double now)
     {
         PetEngine.Tick(Pet, now);
+        try
+        {
+            // Grok Bot's desktop app does not run hook files; follow its local store.
+            var grokHook = Path.Combine(AppConfig.HomeDirectory, ".grok", "hooks", "mochi-island.json");
+            if (File.Exists(grokHook) && GrokBotSession.Available()) GrokBotSession.Sync(AppConfig.TasksFile, now);
+        }
+        catch
+        {
+            // The store can be mid-write; the next refresh picks it up.
+        }
         var loaded = TaskReader.Load(AppConfig.TasksFile, now, true);
         if (Prefs.ScanTranscripts && TranscriptHints.Due(hintScan, now, true))
         {
@@ -161,6 +171,12 @@ public sealed class DesktopState
     public void SetLook(string look)
     {
         Prefs.Look = IslandPrefs.NormalizeLook(look);
+        prefsStore.Save(Prefs);
+    }
+
+    public void SetLanguage(string language)
+    {
+        Prefs.Language = IslandPrefs.Languages.Contains(language) ? language : "system";
         prefsStore.Save(Prefs);
     }
 

@@ -1,6 +1,8 @@
 using System.IO;
 using Microsoft.UI.Dispatching;
+using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Windowing;
+using WinRT;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
@@ -39,6 +41,12 @@ namespace MochiIsland
         private bool upward;
         private int dotPhase;
         private double selectionTarget;
+        private int framePw;
+        private int framePh;
+        private double frameDip;
+        private double frameRaster;
+        private string regionKey = "";
+        private static readonly Dictionary<string, BitmapImage> agentImages = new();
         private bool selectionMoving;
 
         public ShellWindow()
@@ -51,7 +59,7 @@ namespace MochiIsland
             presenter.IsMaximizable = false;
             presenter.IsMinimizable = false;
             AppWindow.SetPresenter(presenter);
-            SystemBackdrop = null;
+            SetBackdrop(state.Expanded);
             Stage.PointerPressed += Pressed;
             Stage.PointerMoved += Moved;
             Stage.PointerReleased += Released;
@@ -59,9 +67,28 @@ namespace MochiIsland
             Stage.Loaded += (_, _) =>
             {
                 if (hwnd != IntPtr.Zero) LayoutWindow(animating ? animHeight : null);
+                foreach (var delay in new[] { 250, 800, 1800 })
+                {
+                    var timer = DispatcherQueue.CreateTimer();
+                    timer.Interval = TimeSpan.FromMilliseconds(delay);
+                    timer.Tick += (_, _) =>
+                    {
+                        timer.Stop();
+                        ApplyChrome();
+                    };
+                    timer.Start();
+                }
             };
-            Closed += (_, _) => Shutdown();
-            Activated += (_, _) => Ensure();
+            Closed += (_, _) =>
+            {
+                Shutdown();
+                petOverlay?.Dispose();
+            };
+            Activated += (_, _) =>
+            {
+                Ensure();
+                ApplyChrome();
+            };
         }
 
         private void Ensure()
@@ -83,9 +110,38 @@ namespace MochiIsland
             dots = DispatcherQueue.CreateTimer();
             dots.Interval = TimeSpan.FromMilliseconds(320);
             dots.IsRepeating = true;
-            dots.Tick += (_, _) => { dotPhase = (dotPhase + 1) % 4; SyncBubble(); };
+            dots.Tick += (_, _) =>
+            {
+                dotPhase = (dotPhase + 1) % 4;
+                SyncBubble();
+                NativeWindow.EnsureTopMost(hwnd);
+                ApplyChrome();
+                petOverlay?.EnsureTopMost();
+                if (hwnd != IntPtr.Zero && framePw > 0)
+                {
+                    var key = state.Expanded
+                        ? $"expanded|{framePw}x{framePh}"
+                        : $"collapsed|{framePw}x{framePh}|{frameDip:F2}|{frameRaster:F2}";
+                    if (key != regionKey)
+                    {
+                        // Re-setting an unchanged window region repaints the whole
+                        // window; only touch it when the shape actually changed.
+                        regionKey = key;
+                        if (state.Expanded) NativeWindow.SetStadium(hwnd, framePw, framePh);
+                        else NativeWindow.ClearRegion(hwnd);
+                    }
+                }
+            };
             dots.Start();
             WatchTasks();
+            petOverlay = new PetOverlay(
+                () =>
+                {
+                    if (state.Expanded) return;
+                    state.Toggle();
+                    StartSpring(true);
+                },
+                (centerX, centerY) => SaveCenterAt(centerX, centerY));
             LayoutWindow(null);
         }
 
@@ -111,6 +167,7 @@ namespace MochiIsland
             if (!dragging && dx * dx + dy * dy >= 9 * scale * scale)
             {
                 dragging = true;
+                ShowDragPose(true);
                 if (state.Expanded || animating)
                 {
                     state.Expanded = false;
@@ -126,8 +183,7 @@ namespace MochiIsland
             dragX = x;
             dragY = y;
             var kitten = KittenPixels();
-            AppWindow.MoveAndResize(new RectInt32(centerX - kitten / 2, centerY - kitten / 2, kitten, kitten));
-            NativeWindow.SetStadium(hwnd, kitten, kitten);
+            NativeWindow.MoveOnly(hwnd, centerX - kitten / 2, centerY - kitten / 2);
         }
 
         private void Released(object sender, PointerRoutedEventArgs e)
@@ -138,6 +194,7 @@ namespace MochiIsland
             dragging = false;
             if (wasDrag)
             {
+                ShowDragPose(false);
                 SaveCenter();
                 LayoutWindow(null);
                 return;
@@ -210,12 +267,66 @@ namespace MochiIsland
             var pw = Math.Max(1, (int)Math.Round(frame.Width * scale));
             var ph = Math.Max(1, (int)Math.Round(frame.Height * scale));
             if (!dragging) AppWindow.MoveAndResize(new RectInt32(px, py, pw, ph));
-            NativeWindow.SetStadium(hwnd, pw, ph);
+            NativeWindow.EnsureTopMost(hwnd);
+            if (state.Expanded) NativeWindow.SetStadium(hwnd, pw, ph);
+            else NativeWindow.ClearRegion(hwnd);
+            regionKey = state.Expanded
+                ? $"expanded|{pw}x{ph}"
+                : $"collapsed|{pw}x{ph}|{frame.Width:F2}|{scale:F2}";
             var dipHeight = frame.Height;
+            framePw = pw;
+            framePh = ph;
+            frameDip = frame.Width;
+            frameRaster = scale;
             NativeWindow.SetHitTest(hwnd, (x, y) => CapsuleOutline.Contains(new YupPoint(x / scale, y / scale), frame.Width, dipHeight));
-            SystemBackdrop = state.Expanded ? new DesktopAcrylicBackdrop() : null;
+            SetBackdrop(state.Expanded);
             Rebuild(frame.Width, dipHeight);
             PlaceBubble(screen, frame, scale, work);
+            ApplyChrome();
+            if (!state.Expanded && !animating && !overlayBroken)
+            {
+                petOverlay?.Show(px, py, pw, ph, state.Prefs.Look);
+                if (!shellHidden)
+                {
+                    AppWindow.Hide();
+                    shellHidden = true;
+                }
+            }
+            else
+            {
+                petOverlay?.Hide();
+                if (shellHidden)
+                {
+                    AppWindow.Show();
+                    shellHidden = false;
+                }
+            }
+        }
+
+        private void ApplyChrome()
+        {
+            // WinAppSDK 1.6: SetBorderAndTitleBar must be called on the attached
+            // presenter, otherwise a 1px frame cannot be removed (microsoft-ui-xaml#10274).
+            if (AppWindow.Presenter is OverlappedPresenter presenter) presenter.SetBorderAndTitleBar(false, false);
+            NativeWindow.EnsureBorderless(hwnd);
+        }
+
+        private void ShowDragPose(bool drag)
+        {
+            if (idlePose != null) idlePose.Visibility = drag ? Visibility.Collapsed : Visibility.Visible;
+            if (dragPose != null) dragPose.Visibility = drag ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        private void SetBackdrop(bool expanded)
+        {
+            if (backdropExpanded == expanded) return;
+            backdropExpanded = expanded;
+            // Transparent backdrops are unstable in this environment; keep the
+            // window opaque so the pet and capsule always stay visible.
+            SystemBackdrop = expanded
+                ? new DesktopAcrylicBackdrop()
+                : new WinUIEx.TransparentTintBackdrop(Windows.UI.Color.FromArgb(1, 255, 255, 255));
+            ApplyChrome();
         }
 
         private void Rebuild(double width, double height)
@@ -233,6 +344,7 @@ namespace MochiIsland
             var fresh = key != chromeKey;
             chromeKey = key;
             if (!fresh) return;
+            AgentRing.Stop();
             Stage.Children.Clear();
             rows.Clear();
             var s = ShellScale.Factor(state.Prefs.PetScale);
@@ -289,8 +401,8 @@ namespace MochiIsland
             {
                 var fill = new Border
                 {
-                    Width = AppConfig.AgentIcon * ShellScale.Factor(state.Prefs.PetScale) + 8,
-                    Height = AppConfig.AgentIcon * ShellScale.Factor(state.Prefs.PetScale) + 8,
+                    Width = (AppConfig.AgentIcon + 8) * ShellScale.Factor(state.Prefs.PetScale),
+                    Height = (AppConfig.AgentIcon + 8) * ShellScale.Factor(state.Prefs.PetScale),
                     CornerRadius = new CornerRadius(AppConfig.SelectedRadius),
                     Background = selectionMoving
                         ? new SolidColorBrush(Color.FromArgb(96, 255, 255, 255))
@@ -315,21 +427,27 @@ namespace MochiIsland
                     timer.Start();
                 }
             }
-            var face = Face(kind, icon, title);
+            if (kind == "agent" && icon is AgentIconRow ringRow)
+            {
+                var ring = AgentRing.Create(ringRow.Status, height);
+                if (ring != null) host.Children.Add(ring);
+            }
+            var face = Face(kind, icon, title, width);
             face.HorizontalAlignment = HorizontalAlignment.Center;
             face.VerticalAlignment = VerticalAlignment.Center;
             host.Children.Add(face);
             if (icon?.ShowsDot == true)
             {
+                var dotScale = ShellScale.Factor(state.Prefs.PetScale);
                 var dot = new Border
                 {
-                    Width = 8,
-                    Height = 8,
-                    CornerRadius = new CornerRadius(4),
+                    Width = 8 * dotScale,
+                    Height = 8 * dotScale,
+                    CornerRadius = new CornerRadius(4 * dotScale),
                     Background = new SolidColorBrush(Color.FromArgb(255, 220, 68, 55)),
                     HorizontalAlignment = HorizontalAlignment.Right,
                     VerticalAlignment = VerticalAlignment.Top,
-                    Margin = new Thickness(0, 6, 10, 0)
+                    Margin = new Thickness(0, 6 * dotScale, 10 * dotScale, 0)
                 };
                 host.Children.Add(dot);
             }
@@ -337,27 +455,57 @@ namespace MochiIsland
             rows.Add(new ChromeRow(kind, id, top, height));
         }
 
-        private FrameworkElement Face(string kind, AgentIconRow? icon, string title)
+        private FrameworkElement Face(string kind, AgentIconRow? icon, string title, double width)
         {
+            var pet = ShellScale.Factor(state.Prefs.PetScale);
             if (icon is AgentIconRow row)
             {
                 var path = Path.Combine(AppContext.BaseDirectory, "Web", "pets", SlotFace.AgentMark(row.Source) + ".png");
                 if (File.Exists(path))
                 {
-                    var image = new Image
+                    if (!agentImages.TryGetValue(path, out var source))
                     {
-                        Source = new BitmapImage(new Uri(path)),
-                        Width = AppConfig.AgentIcon,
-                        Height = AppConfig.AgentIcon
+                        source = new BitmapImage(new Uri(path));
+                        agentImages[path] = source;
+                    }
+                    return new Image
+                    {
+                        Source = source,
+                        Width = AppConfig.AgentIcon * pet,
+                        Height = AppConfig.AgentIcon * pet
                     };
-                    return image;
                 }
+            }
+            if (kind == "kitten" && KittenArt.Artwork(state.Prefs.Look) != null)
+            {
+                var scale = ShellScale.Factor(state.Prefs.PetScale);
+                var side = state.Expanded ? AppConfig.AgentIcon * scale : width;
+                if (!state.Expanded)
+                {
+                    var poses = new Grid { Width = side, Height = side };
+                    var idle = new Image { Source = KittenArt.Artwork(state.Prefs.Look), Stretch = Stretch.Uniform };
+                    var pose = System.IO.Path.Combine(AppContext.BaseDirectory, "Web", "pets", "dragging.png");
+                    if (cachedDragArt == null && File.Exists(pose)) cachedDragArt = new BitmapImage(new Uri(pose));
+                    var drag = new Image
+                    {
+                        Source = cachedDragArt,
+                        Stretch = Stretch.Uniform,
+                        Visibility = dragging ? Visibility.Visible : Visibility.Collapsed
+                    };
+                    idle.Visibility = dragging ? Visibility.Collapsed : Visibility.Visible;
+                    poses.Children.Add(idle);
+                    poses.Children.Add(drag);
+                    idlePose = idle;
+                    dragPose = drag;
+                    return poses;
+                }
+                return KittenArt.Face(state.Prefs.Look, side);
             }
             return new TextBlock
             {
                 Text = kind == "kitten" ? title : title.Length > 0 ? title[..1] : "",
                 FontFamily = new FontFamily("Microsoft YaHei UI"),
-                FontSize = kind == "kitten" ? 22 : 16,
+                FontSize = (kind == "kitten" ? 22 : 16) * pet,
                 Foreground = new SolidColorBrush(Color.FromArgb(255, 36, 31, 28)),
                 TextAlignment = TextAlignment.Center
             };
@@ -399,11 +547,12 @@ namespace MochiIsland
             }
             var icon = new YupRect(capsule.X, capsule.MaxY - anchor.Top - anchor.Height, capsule.Width, anchor.Height);
             var cardHeight = state.PickerOpen ? 72 : state.CardExpanded ? 280 : 168;
-            var placement = BubblePlacer.Place(icon, capsule, new YupSize(220, cardHeight), screen);
-            var beak = AppConfig.BeakWidth;
-            var windowX = placement.PointsRight ? placement.Frame.X : placement.Frame.X - beak;
-            var bodyX = placement.PointsRight ? 0 : beak;
-            var frame = new YupRect(windowX, placement.Frame.Y, placement.Frame.Width + beak, placement.Frame.Height);
+            var pickerCount = state.PickerOpen ? state.Prefs.PickerSources().Count : 0;
+            var cardWidth = pickerCount == 0
+                ? 220
+                : Math.Min(300, 36 + pickerCount * 36 + Math.Max(0, pickerCount - 1) * 8);
+            var placement = BubblePlacer.Place(icon, capsule, new YupSize(cardWidth, cardHeight), screen);
+            var frame = placement.Frame;
             var topLeft = ShellGeometry.ToTopLeft(frame, screen.Height);
             var task = state.SelectedTask;
             var answer = task?.Answer ?? "";
@@ -415,8 +564,8 @@ namespace MochiIsland
                 answer,
                 state.CardExpanded,
                 placement.PointsRight,
-                bodyX,
-                Math.Max(0, placement.BeakY - AppConfig.BeakHeight / 2),
+                0,
+                0,
                 Source =>
                 {
                     AgentOpener.Open(Source);
@@ -524,6 +673,38 @@ namespace MochiIsland
         private int KittenPixels()
         {
             return Math.Max(1, (int)Math.Round(AppConfig.KittenSize * ShellScale.Factor(state.Prefs.PetScale) * Scale()));
+        }
+
+        private PetOverlay? petOverlay;
+        private bool shellHidden;
+        private bool overlayBroken = true; // layered windows do not paint on this machine
+        private bool? backdropExpanded;
+        private DesktopAcrylicController? acrylic;
+        private SystemBackdropConfiguration? acrylicConfig;
+        private Image? idlePose;
+        private Image? dragPose;
+        private static BitmapImage? cachedDragArt;
+        private bool overlayVerified;
+        private long lastOverlayTry;
+
+        private void ApplyCollapsedRegion(int width, int height, double dipSide, double raster)
+        {
+            var badge = Math.Max(10, dipSide * 0.28);
+            var margin = dipSide * 0.04;
+            var x = (int)Math.Round((dipSide - margin - badge) * raster) - 1;
+            var y = (int)Math.Round((dipSide - margin - badge) * raster) - 1;
+            var size = Math.Max(1, (int)Math.Round(badge * raster)) + 2;
+            NativeWindow.SetStadiumWithDisc(hwnd, width, height, x, y, size);
+        }
+
+        private void SaveCenterAt(int centerX, int centerY)
+        {
+            var work = WorkArea();
+            var scale = Scale();
+            var screen = new YupRect(work.X / scale, 0, work.Width / scale, work.Height / scale);
+            var yUp = screen.Height - (centerY - work.Y) / scale;
+            var ratios = ShellGeometry.Ratios(new YupPoint(centerX / scale, yUp), screen);
+            state.SaveAnchor(ratios.X, ratios.Y);
         }
 
         private double Scale()

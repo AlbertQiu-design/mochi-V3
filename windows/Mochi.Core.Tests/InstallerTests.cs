@@ -71,7 +71,7 @@ public class InstallerTests
         var commands = groups.SelectMany(group => Bags.Array(group["hooks"]).Select(Bags.Object)).ToList();
         Assert.Contains(commands, entry => Bags.Text(entry["command"]).Contains("/bin/echo keep"));
         Assert.Contains(commands, entry => Bags.Whole(entry.GetValueOrDefault(AppConfig.HookMarker)) == AppConfig.HookVersion && Bags.Text(entry["command"]).Contains("--source codex"));
-        var command = binary + " --source codex";
+        var command = "\"" + binary + "\" --source codex";
         var trusted = CodexHookTrust.IdentityHash("user_prompt_submit", command, 10);
         Assert.Contains("trusted_hash = \"" + trusted + "\"", configText);
         Assert.True(HookInstaller.CodexStatus(config, hooks, binary).Connected);

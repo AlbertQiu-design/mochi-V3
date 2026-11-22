@@ -16,6 +16,7 @@ public static class AgentConnectorRegistry
     public static IReadOnlyList<IAgentConnector> Primary { get; } =
     [
         new CursorConnector(),
+        new ClaudeConnector(),
         new CodexConnector(),
         new GrokConnector()
     ];
@@ -45,6 +46,20 @@ public sealed class CursorConnector : IAgentConnector
 
     private static string HooksPath => Path.Combine(AppConfig.CursorDirectory, "hooks.json");
     private static string TasksPath => AppConfig.TasksFile;
+}
+
+public sealed class ClaudeConnector : IAgentConnector
+{
+    public string Id => "claude";
+    public string DisplayName => "Claude Code";
+    public bool NeedsPrivacyAck => true;
+
+    public HookInstallResult Status(string binaryPath) => HookInstaller.ClaudeStatus(SettingsPath, binaryPath);
+    public HookInstallResult Connect(string binaryPath, bool privacyAccepted) => HookInstaller.InstallClaude(SettingsPath, binaryPath, privacyAccepted);
+    public HookInstallResult Disconnect(string binaryPath) => HookInstaller.RemoveNested(SettingsPath, binaryPath);
+    public bool Retarget(string binaryPath) => HookInstaller.RetargetNested(SettingsPath, binaryPath, "claude");
+
+    private static string SettingsPath => Path.Combine(AppConfig.HomeDirectory, ".claude", "settings.json");
 }
 
 public sealed class CodexConnector : IAgentConnector
@@ -114,6 +129,11 @@ public static class GrokCLI
             {
                 if (FileBits.IsExecutable(Path.Combine(directory, name))) return true;
             }
+        }
+        // The installer drops the CLI in ~/.grok/bin, which is usually not on PATH.
+        foreach (var name in new[] { "grok.exe", "grok" })
+        {
+            if (FileBits.IsExecutable(Path.Combine(AppConfig.HomeDirectory, ".grok", "bin", name))) return true;
         }
         return false;
     }

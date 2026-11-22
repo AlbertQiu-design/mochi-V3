@@ -271,7 +271,7 @@ public static class HookInstaller
                 {
                     if (!IsOurs(entries[entryIndex])) continue;
                     var existing = Bags.Text(entries[entryIndex].GetValueOrDefault("command"));
-                    if (existing == command || existing.Contains(binaryPath, StringComparison.Ordinal)) continue;
+                    if (existing == command) continue;
                     entries[entryIndex]["command"] = command;
                     entries[entryIndex][AppConfig.HookMarker] = AppConfig.HookVersion;
                     changed = true;
@@ -290,8 +290,9 @@ public static class HookInstaller
 
     public static string ShellCommand(string binaryPath, string source, string? eventName = null)
     {
-        var path = binaryPath.Contains(' ') ? "\"" + binaryPath + "\"" : binaryPath;
-        var command = path + " --source " + source;
+        // Always quoted: Claude Code runs hooks through bash on Windows, and an
+        // unquoted C:\... path loses its backslashes before bash sees it.
+        var command = "\"" + binaryPath + "\" --source " + source;
         if (!string.IsNullOrEmpty(eventName)) command += " --event " + eventName;
         return command;
     }
